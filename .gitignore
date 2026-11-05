@@ -1,0 +1,38 @@
+# Variables de entorno y secretos
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+backend/venv/
+
+# Node.js
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# CMake y compilación C++
+build/
+cmake-build-*/
+motor/bin/*
+!motor/bin/.gitkeep
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+
+# Editores
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# Resultados y datos generados
+results/*
+!results/.gitkeep
