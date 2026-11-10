@@ -307,7 +307,7 @@ export function PerformanceComparison() {
                     <span
                       style={{
                         fontWeight: 700,
-                        color: item.speedup > 10 ? 'var(--gold-dark)' : item.speedup > 1 ? 'var(--agri-green)' : 'inherit',
+                        color: (item.speedup ?? 0) > 10 ? 'var(--gold-dark)' : (item.speedup ?? 0) > 1 ? 'var(--agri-green)' : 'inherit',
                       }}
                     >
                       {item.speedup}×

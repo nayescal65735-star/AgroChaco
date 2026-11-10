@@ -4,8 +4,6 @@ import { Card } from '../components/common/Card';
 import { StatusBadge } from '../components/common/StatusBadge';
 import { EngineBadge } from '../components/common/EngineBadge';
 import {
-  Play,
-  Pause,
   Terminal,
   Activity,
   CheckCircle2,
@@ -26,22 +24,11 @@ export function SimulationExecution() {
     simulations,
     activeSimulation,
     setActiveSimulationId,
-    startExecution,
-    stopExecution,
   } = useSimulations();
   const navigate = useNavigate();
 
   // If there's no active simulation selected, pick running or latest
   const runningSim = simulations.find((s) => s.status === 'running') || activeSimulation || simulations[0];
-
-  const handleToggleExecution = () => {
-    if (!runningSim) return;
-    if (runningSim.status === 'running') {
-      stopExecution(runningSim.id);
-    } else {
-      startExecution(runningSim.id);
-    }
-  };
 
   if (!runningSim) {
     return (
@@ -99,20 +86,11 @@ export function SimulationExecution() {
 
           <button
             type="button"
-            className={`btn ${runningSim.status === 'running' ? 'btn-danger' : 'btn-primary'}`}
-            onClick={handleToggleExecution}
+            className="btn btn-outline"
+            disabled
+            title="Disponible cuando se integre el motor HPC"
           >
-            {runningSim.status === 'running' ? (
-              <>
-                <Pause size={16} />
-                Pausar Ejecución
-              </>
-            ) : (
-              <>
-                <Play size={16} fill="#ffffff" />
-                {runningSim.status === 'completed' ? 'Re-ejecutar' : 'Iniciar / Continuar'}
-              </>
-            )}
+            Motor HPC pendiente de integración
           </button>
         </div>
       </div>
@@ -201,7 +179,9 @@ export function SimulationExecution() {
               Humedad del Suelo Actual
             </div>
             <div style={{ fontSize: '0.98rem', fontWeight: 700, color: '#0284c7', marginTop: '0.2rem' }}>
-              {runningSim.soilMoistureFinalPercent}%
+              {runningSim.soilMoistureFinalPercent != null
+                ? `${runningSim.soilMoistureFinalPercent}%`
+                : 'Pendiente de resultados reales'}
             </div>
           </div>
 
@@ -210,7 +190,7 @@ export function SimulationExecution() {
               Estrés CWSI Actual
             </div>
             <div style={{ fontSize: '0.98rem', fontWeight: 700, color: '#dc2626', marginTop: '0.2rem' }}>
-              {runningSim.averageCWSI.toFixed(3)} (Alto)
+              {runningSim.averageCWSI !== undefined ? runningSim.averageCWSI.toFixed(3) : 'Pendiente de resultados reales'}
             </div>
           </div>
 
@@ -219,7 +199,12 @@ export function SimulationExecution() {
               Aceleración / Speedup
             </div>
             <div style={{ fontSize: '0.98rem', fontWeight: 700, color: 'var(--gold-dark)', marginTop: '0.2rem' }}>
-              {runningSim.speedup}× ({runningSim.efficiency}% Efic.)
+              {runningSim.speedup != null
+                ? `${runningSim.speedup.toFixed(2)}×`
+                : 'Pendiente'}
+              {' '}({runningSim.efficiency != null
+                ? `${runningSim.efficiency.toFixed(1)}% Efic.`
+                : 'Eficiencia pendiente'})
             </div>
           </div>
         </div>
@@ -334,20 +319,20 @@ export function SimulationExecution() {
           subtitle="Salida de consola estándar (stdout/stderr) de Slurm, MPI y OpenMP"
         >
           <div className="terminal-window">
-            {runningSim.logs.map((log, idx) => (
+            {runningSim.logs.length === 0 ? (
+              <div className="terminal-line">
+                <span className="terminal-tag INFO">[INFO]</span>
+                <span className="terminal-msg">
+                  No hay registros de ejecución. Los logs aparecerán cuando se integre el motor HPC.
+                </span>
+              </div>
+            ) : runningSim.logs.map((log, idx) => (
               <div key={idx} className="terminal-line">
                 <span className="terminal-time">[{log.timestamp}]</span>
                 <span className={`terminal-tag ${log.level}`}>[{log.level}]</span>
                 <span className="terminal-msg">{log.message}</span>
               </div>
             ))}
-            {runningSim.status === 'running' && (
-              <div className="terminal-line" style={{ color: '#22c55e' }}>
-                <span className="terminal-time">[LIVE]</span>
-                <span className="terminal-tag INFO">[RUN]</span>
-                <span className="terminal-msg">Calculando celdas en paralelo... paso temporal en curso.</span>
-              </div>
-            )}
           </div>
         </Card>
       </div>
