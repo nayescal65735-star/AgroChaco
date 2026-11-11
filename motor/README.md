@@ -1,8 +1,8 @@
-# AgroChaco — Motor de Simulación Secuencial (C++17)
+# AgroChaco — Motor de Simulación Paralela y Distribuida (C++17)
 
 **Materia:** TEL420 Sistemas Paralelos (Gestión 2026)  
-**Módulo:** `motor/` — Línea Base Secuencial de Cómputo ($T_1$)  
-**Versión:** 1.1.0 (Etapa 1: Arquitectura Base, Validación Física y Correcciones de Auditoría)  
+**Módulo:** `motor/` — Motores Secuencial, OpenMP, MPI e Híbrido
+**Versión:** 2.0.0 (Motores paralelos, distribuidos y validación de rendimiento)
 
 ---
 
@@ -10,10 +10,10 @@
 
 El motor de simulación de **AgroChaco** es un software de modelado biofísico y cómputo numérico de alto rendimiento diseñado para evaluar el impacto de la sequía y el estrés hídrico en cultivos de maíz dentro del Gran Chaco boliviano (Tarija, Santa Cruz y Chuquisaca).
 
-Esta primera versión implementa el **motor secuencial mono-hilo en C++17**, el cual actúa como:
-1. **Línea base matemática y agronómica:** Modelo de referencia con resultados 100% deterministas y conservación estricta de masa de agua para futuras pruebas de equivalencia numérica con OpenMP, MPI e Híbrido.
-2. **Línea base computacional ($T_1$):** Medición de tiempo monohilo con `std::chrono::high_resolution_clock` para el cálculo riguroso de *Speedup* ($S_p = T_1 / T_p$) y *Eficiencia Paralela* ($E_p = S_p / p$) en las etapas posteriores.
-3. **Contrato de integración desacoplado:** Capa de serialización en formato JSON compatible directamente con el backend de FastAPI y la interfaz web en React/TypeScript (`SimulationResult`).
+El módulo implementa cuatro modalidades de ejecución en **C++17**: secuencial, paralela con OpenMP, distribuida con MPI e híbrida MPI + OpenMP. El motor secuencial actúa como referencia matemática y computacional para evaluar las versiones paralelas.
+1. **Referencia matemática y agronómica:** El motor secuencial proporciona la línea base para contrastar los resultados de las implementaciones paralelas y distribuidas.
+2. **Cómputo paralelo y distribuido:** OpenMP utiliza memoria compartida; MPI distribuye el trabajo entre procesos; el motor híbrido combina ambos modelos.
+3. **Integración de resultados:** Los motores generan resultados estructurados en JSON, compatibles con el contrato de integración del backend y la interfaz del proyecto.
 
 ---
 
@@ -80,6 +80,8 @@ $$1 - \frac{Y_a}{Y_m} = \left[ \sum_{i=1}^{n} K_{y, i} \times \left(1 - \frac{ET
 - Compilador de C++ con soporte C++17 (`g++ >= 9.0` o `clang++ >= 10.0`).
 - `CMake >= 3.16`.
 - GNU `make`.
+- OpenMP compatible con el compilador C++.
+- OpenMPI (`libopenmpi-dev` y `openmpi-bin`) para las versiones MPI e híbrida.
 
 ### Instrucciones de Compilación
 Desde la raíz del repositorio (`~/AgroChaco`):
@@ -91,47 +93,136 @@ cmake -B build -S motor
 # 2. Compilación de biblioteca y ejecutables
 cmake --build build
 
-# Binarios generados en motor/bin/:
-# - motor/bin/agrochaco_secuencial
-# - motor/bin/test_motor
+# Ejecutables generados en motor/bin/:
+# - agrochaco_secuencial
+# - agrochaco_openmp
+# - agrochaco_mpi
+# - agrochaco_hibrido
+# - test_motor
 ```
 
 ---
 
-## 5. Ejecución del Motor Secuencial
 
-```bash
-# Ejecución con configuración JSON y exportación completa
-./motor/bin/agrochaco_secuencial \
-  --config motor/config/simulacion_villamontes.json \
-  --output results/resultado_villamontes.json \
-  --csv results/timeline_villamontes.csv
-```
+## 5. Ejecución de los Motores
 
-Opciones disponibles en CLI:
-- `-c`, `--config <archivo.json>`: Ruta al archivo JSON de configuración.
-- `-o`, `--output <archivo.json>`: Ruta donde se guardará el resultado estructurado JSON.
-- `--csv <archivo.csv>`: Exportación tabular de la serie temporal diaria.
-- `-d`, `--days <N>`: Sobrescribe la cantidad de días simulados (1-365).
-- `-r`, `--rows <N>`: Sobrescribe las filas de la malla espacial.
-- `--cols <N>`: Sobrescribe las columnas de la malla espacial.
-- `-h`, `--help`: Muestra el menú de ayuda.
+### 5.1. Secuencial
+
+    ./motor/bin/agrochaco_secuencial --config motor/config/simulacion_yacuiba.json --days 120 --rows 500 --cols 500 --output results/secuencial.json
+
+### 5.2. OpenMP
+
+    ./motor/bin/agrochaco_openmp --config motor/config/simulacion_yacuiba.json --days 120 --rows 500 --cols 500 --threads 16 --output results/openmp.json
+
+### 5.3. MPI
+
+    mpirun -np 4 ./motor/bin/agrochaco_mpi --config motor/config/simulacion_yacuiba.json --days 120 --rows 500 --cols 500 --output results/mpi.json
+
+### 5.4. Híbrido MPI + OpenMP
+
+    mpirun -np 2 ./motor/bin/agrochaco_hibrido --config motor/config/simulacion_yacuiba.json --days 120 --rows 500 --cols 500 --threads 8 --output results/hibrido.json
+
+### 5.5. Opciones
+
+- `--config`: archivo JSON de configuración.
+- `--output`: archivo de resultados JSON.
+- `--csv`: exportación de resultados diarios.
+- `--days`: días de simulación.
+- `--rows`: filas de la malla.
+- `--cols`: columnas de la malla.
+- `--threads`: hilos OpenMP.
+- `mpirun -np`: procesos MPI.
+
+Los resultados incluyen el campo `executionTimeSeconds`.
 
 ---
 
-## 6. Suite de Pruebas Unitarias y Físicas
+## 6. Suite de Pruebas Unitarias
 
-Para ejecutar la suite automatizada de 8 pruebas:
-```bash
-./motor/bin/test_motor
-```
+Ejecutar:
 
-Pruebas cubiertas:
-1. `testValidationRejectsInvalidParameters`: Rechazo de configuraciones con dimensiones, días o humedades no válidas.
-2. `testWaterMassConservation`: Conservación estricta de masa ($|\Delta W + ET_a + Drenaje - P| < 10^{-11}\text{ mm}$) en celdas individuales y en la malla 2D.
-3. `testNoPrecipitationDay`: Comportamiento de desecación pura sin drenaje gravitacional en días secos.
-4. `testExtremeRainfall`: Precipitación extrema ($150\text{ mm}$) saturando hasta Capacidad de Campo y evacuando el exceso.
-5. `testZeroEtcHandling`: Robustez matemática ante $ET_c = 0$, asegurando que no existan divisiones por cero ni valores NaN.
-6. `testProlongedDroughtAndPmpConvergence`: Sequía prolongada de 100 días convergiendo asintóticamente a PMP con $CWSI \to 1.0$.
-7. `testFao33YieldLossCalculation`: Sensibilidad diferencial por etapas fenológicas (floración R1 vs maduración R6) y acotamiento en $[0, 100]\%$.
-8. `testSequentialEngineReproducibility`: Determinismo numérico estricto bit a bit entre ejecuciones sucesivas.
+    ./motor/bin/test_motor
+
+También se puede utilizar CTest:
+
+    ctest --test-dir build --output-on-failure
+
+La suite contiene ocho pruebas: validación de parámetros, conservación de masa de agua, día sin precipitación, lluvia extrema, ETc igual a cero, sequía prolongada, cálculo FAO-33 y reproducibilidad secuencial.
+
+**Resultado registrado:** 8/8 pruebas aprobadas y CTest con 100 % de éxito.
+
+---
+
+## 7. Evaluación del Rendimiento
+
+### 7.1. Configuración experimental
+
+| Parámetro | Valor |
+|---|---|
+| Zona | Yacuiba |
+| Días | 120 |
+| Filas | 500 |
+| Columnas | 500 |
+| Celdas | 250.000 |
+| Ejecuciones medidas | 5 por motor |
+| Calentamiento | 1 ejecución por motor |
+| Procesador | Intel Core i7-13700 |
+| Sistema operativo | Ubuntu 24.04.2 LTS |
+
+### 7.2. Resultados
+
+| Motor | Recursos | Promedio (s) | Mediana (s) | Speedup | Eficiencia |
+|---|---|---:|---:|---:|---:|
+| Secuencial | 1 hilo | 0.2450 | 0.2440 | 1.00x | 100.00 % |
+| OpenMP | 16 hilos | 0.0408 | 0.0400 | 6.00x | 37.53 % |
+| MPI | 4 procesos | 0.0682 | 0.0670 | 3.59x | 89.81 % |
+| Híbrido | 2 × 8 | 0.1194 | 0.1210 | 2.05x | 12.82 % |
+
+### 7.3. Fórmulas
+
+Speedup:
+
+    S_p = T_1 / T_p
+
+Eficiencia:
+
+    E_p = (S_p / p) * 100
+
+Donde T1 es el tiempo secuencial, Tp el tiempo paralelo y p el número de trabajadores nominales.
+
+### 7.4. Análisis
+
+- OpenMP obtuvo el menor tiempo promedio.
+- MPI consiguió un speedup de 3.59x.
+- El híbrido presentó mayor costo de coordinación en esta configuración.
+- El motor secuencial constituye la referencia experimental.
+
+Los resultados corresponden a las condiciones de esta prueba y no son universales.
+
+---
+
+## 8. Verificación de Resultados Agronómicos
+
+Los cinco indicadores se mantuvieron consistentes en las cinco ejecuciones medidas de cada motor.
+
+| Indicador | Secuencial | OpenMP | MPI | Híbrido |
+|---|---:|---:|---:|---:|
+| CWSI promedio | 0.67 | 0.67 | 0.67 | 0.67 |
+| Humedad final (%) | 8.5 | 8.5 | 8.5 | 8.5 |
+| Déficit hídrico (mm) | 373.1 | 373.1 | 373.1 | 373.1 |
+| Pérdida de rendimiento (%) | 95.0 | 95.0 | 95.0 | 95.0 |
+| Rendimiento estimado (tn/ha) | 0.27 | 0.27 | 0.27 | 0.27 |
+
+La comparación se realizó con la precisión almacenada en los archivos JSON.
+
+---
+
+## 9. Archivos de Resultados
+
+Los resultados experimentales se almacenan en:
+
+    results/benchmark_final/
+
+Incluyen los archivos JSON de las ejecuciones, `mediciones.csv` y `resumen.csv`.
+
+Estos archivos respaldan el análisis experimental y se conservan localmente.

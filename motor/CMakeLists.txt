@@ -77,3 +77,7 @@ add_executable(agrochaco_hibrido
     src/main_hybrid.cpp
 )
 target_link_libraries(agrochaco_hibrido PRIVATE agrochaco_core MPI::MPI_CXX OpenMP::OpenMP_CXX)
+
+# Registro de pruebas unitarias en CTest
+enable_testing()
+add_test(NAME AgroChaco_Tests COMMAND test_motor)
