@@ -1,0 +1,21 @@
+{
+  "id": "SIM-GC-2026-VM01",
+  "name": "Simulación Sequía Extrema SSP585 - Villa Montes (Maíz Criollo)",
+  "description": "Evaluación del impacto de sequía severa en el Chaco tarijeño sobre maíz Criollo Chaqueño con rusticidad alta.",
+  "zone": "villamontes",
+  "zoneName": "Villa Montes",
+  "department": "Tarija",
+  "soilType": "arenoso",
+  "cornVariety": "chaco_01_criollo",
+  "plantingDate": "2026-11-15",
+  "simulationDays": 120,
+  "gridConfig": {
+    "rows": 40,
+    "cols": 40,
+    "cellSizeMeters": 50.0
+  },
+  "initialMoisturePercent": 14.5,
+  "droughtScenario": "extremo_ssp585",
+  "engine": "secuencial",
+  "createdAt": "2026-11-10 12:00:00"
+}

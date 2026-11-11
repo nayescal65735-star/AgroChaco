@@ -1,0 +1,21 @@
+{
+  "id": "SIM-GC-2026-YAC01",
+  "name": "Evaluación Híbrido INIAF H1 en Yacuiba (Transición Hídrica)",
+  "description": "Simulación en suelo franco-arenoso del Chaco con escenario moderado SSP245 e híbrido chaqueño INIAF H1.",
+  "zone": "yacuiba",
+  "zoneName": "Yacuiba",
+  "department": "Tarija",
+  "soilType": "franco_arenoso",
+  "cornVariety": "iniaf_h1",
+  "plantingDate": "2026-11-20",
+  "simulationDays": 120,
+  "gridConfig": {
+    "rows": 30,
+    "cols": 30,
+    "cellSizeMeters": 50.0
+  },
+  "initialMoisturePercent": 18.2,
+  "droughtScenario": "moderado_ssp245",
+  "engine": "secuencial",
+  "createdAt": "2026-11-10 12:00:00"
+}
