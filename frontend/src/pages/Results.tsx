@@ -126,7 +126,7 @@ export function Results() {
         />
         <StatCard
           label="Estrés Hídrico Medio (CWSI)"
-          value={currentSim.averageCWSI.toFixed(3)}
+          value={currentSim.averageCWSI !== undefined ? currentSim.averageCWSI.toFixed(3) : 'Sin datos'}
           subtext="Crop Water Stress Index promedio"
           icon={<Activity size={24} />}
           variant="gold"

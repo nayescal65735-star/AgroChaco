@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 
 export function NewSimulation() {
-  const { createSimulation, startExecution } = useSimulations();
+  const { createSimulation } = useSimulations();
   const navigate = useNavigate();
 
   // Form states
@@ -76,10 +76,10 @@ export function NewSimulation() {
 
   const est = calculateEstimate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const newSimId = createSimulation({
+    await createSimulation({
       name,
       zone,
       zoneName: selectedZone.name,
@@ -101,7 +101,6 @@ export function NewSimulation() {
       nodesCount: engine === 'mpi' || engine === 'hibrido' ? nodesCount : 1,
     });
 
-    startExecution(newSimId);
     navigate('/ejecucion');
   };
 

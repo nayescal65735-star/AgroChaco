@@ -10,10 +10,10 @@ export interface SimulationContextType {
   activeSimulation: SimulationResult | null;
   activeSimulationId: string | null;
   setActiveSimulationId: (id: string | null) => void;
-  createSimulation: (config: Omit<SimulationConfig, 'id' | 'createdAt'>) => string;
-  startExecution: (id: string) => void;
+  createSimulation: (config: Omit<SimulationConfig, 'id' | 'createdAt'>) => Promise<string>;
+  startExecution: (id: string) => Promise<void>;
   stopExecution: (id: string) => void;
-  deleteSimulation: (id: string) => void;
+  deleteSimulation: (id: string) => Promise<void>;
   systemHealth: SystemHealthStatus;
   refreshSystemHealth: () => Promise<void>;
   isExecutionActive: boolean;

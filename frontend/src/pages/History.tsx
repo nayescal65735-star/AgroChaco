@@ -10,14 +10,14 @@ import {
   Search,
   Eye,
   Trash2,
-  RotateCcw,
   MapPin,
+  RotateCcw,
   ArrowRight,
   X,
 } from 'lucide-react';
 
 export function History() {
-  const { simulations, setActiveSimulationId, deleteSimulation, startExecution } = useSimulations();
+  const { simulations, setActiveSimulationId, deleteSimulation } = useSimulations();
   const navigate = useNavigate();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -48,10 +48,23 @@ export function History() {
     navigate('/resultados');
   };
 
-  const handleRerun = (id: string) => {
-    startExecution(id);
-    setActiveSimulationId(id);
-    navigate('/ejecucion');
+  const handleDelete = async (id: string) => {
+    const confirmed = window.confirm(
+      '¿Estás seguro de que deseas eliminar esta simulación?'
+    );
+
+    if (!confirmed) return;
+
+    try {
+      await deleteSimulation(id);
+
+      if (inspectSim?.id === id) {
+        setInspectSim(null);
+      }
+    } catch (error) {
+      console.error('Error al eliminar simulación:', error);
+      window.alert('No se pudo eliminar la simulación. Intenta nuevamente.');
+    }
   };
 
   return (
@@ -153,6 +166,7 @@ export function History() {
               <option value="running">En ejecución</option>
               <option value="pending">En cola</option>
               <option value="paused">Pausadas</option>
+              <option value="failed">Fallidas</option>
             </select>
           </div>
         </div>
@@ -222,16 +236,20 @@ export function History() {
                       <StatusBadge status={sim.status} />
                     </td>
                     <td>
-                      <div style={{ fontWeight: 700 }}>{sim.executionTimeSeconds}s</div>
+                      <div style={{ fontWeight: 700 }}>
+                        {sim.executionTimeSeconds !== undefined
+                          ? `${sim.executionTimeSeconds}s`
+                          : 'Pendiente'}
+                      </div>
                     </td>
                     <td>
                       <span style={{ fontWeight: 700, color: 'var(--agri-green)' }}>
-                        {sim.speedup}×
+                        {sim.speedup !== undefined ? `${sim.speedup.toFixed(2)}×` : 'Pendiente'}
                       </span>
                     </td>
                     <td>
                       <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                        {sim.createdAt}
+                        {new Date(sim.createdAt).toLocaleString('es-BO')}
                       </span>
                     </td>
                     <td>
@@ -255,15 +273,15 @@ export function History() {
                         <button
                           type="button"
                           className="btn btn-outline btn-sm"
-                          onClick={() => handleRerun(sim.id)}
-                          title="Re-ejecutar corrida"
+                          disabled
+                          title="Disponible cuando se integre el motor HPC"
                         >
                           <RotateCcw size={14} />
                         </button>
                         <button
                           type="button"
                           className="btn btn-danger btn-sm"
-                          onClick={() => deleteSimulation(sim.id)}
+                          onClick={() => handleDelete(sim.id)}
                           title="Eliminar registro"
                         >
                           <Trash2 size={14} />
@@ -362,7 +380,14 @@ export function History() {
               Logs de Ejecución &amp; Paso de Mensajes
             </h3>
             <div className="terminal-window" style={{ maxHeight: '220px', marginBottom: '1.5rem' }}>
-              {inspectSim.logs.map((l, i) => (
+              {inspectSim.logs.length === 0 ? (
+                <div className="terminal-line">
+                  <span className="terminal-tag WARN">[INFO]</span>
+                  <span className="terminal-msg">
+                    Todavía no hay logs. La ejecución estará disponible cuando se integre el motor HPC.
+                  </span>
+                </div>
+              ) : inspectSim.logs.map((l, i) => (
                 <div key={i} className="terminal-line">
                   <span className="terminal-time">[{l.timestamp}]</span>
                   <span className={`terminal-tag ${l.level}`}>[{l.level}]</span>

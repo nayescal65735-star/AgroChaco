@@ -36,7 +36,7 @@ export function Dashboard() {
 
   const totalHectares = GRAN_CHACO_ZONES.reduce((acc, z) => acc + z.activeHectares, 0);
   const avgCWSI = Number(
-    (simulations.reduce((acc, s) => acc + s.averageCWSI, 0) / (totalSimulations || 1)).toFixed(2)
+    (simulations.reduce((acc, s) => acc + (s.averageCWSI ?? 0), 0) / (simulations.filter(s => s.averageCWSI !== undefined).length || 1)).toFixed(2)
   );
 
   // Speedup chart data from benchmark
@@ -349,19 +349,19 @@ export function Dashboard() {
                   </td>
                   <td>
                     <div style={{ fontWeight: 700, color: 'var(--navy)' }}>
-                      {sim.executionTimeSeconds}s
+                      {sim.executionTimeSeconds !== undefined ? `${sim.executionTimeSeconds}s` : 'Pendiente'}
                     </div>
                     <span style={{ fontSize: '0.75rem', color: 'var(--agri-green)', fontWeight: 600 }}>
-                      {sim.speedup > 1 ? `${sim.speedup}x acelerado` : 'Línea base'}
+                      {sim.speedup !== undefined ? (sim.speedup > 1 ? `${sim.speedup}x acelerado` : 'Línea base') : 'Pendiente'}
                     </span>
                   </td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                       <Droplets size={14} color="#0284c7" />
-                      <span style={{ fontWeight: 700 }}>{sim.averageCWSI.toFixed(2)}</span>
+                      <span style={{ fontWeight: 700 }}>{sim.averageCWSI !== undefined ? sim.averageCWSI.toFixed(2) : 'Sin datos'}</span>
                     </div>
                     <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                      Déficit: {sim.waterDeficitMm} mm
+                      Déficit: {sim.waterDeficitMm !== undefined ? `${sim.waterDeficitMm} mm` : 'Sin datos'}
                     </span>
                   </td>
                   <td>
