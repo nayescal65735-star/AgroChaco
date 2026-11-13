@@ -40,3 +40,8 @@ results/*
 # Copias de seguridad generadas
 backups/*
 !backups/.gitkeep
+
+# Publicar únicamente los benchmarks finales del motor AgroChaco
+!results/benchmark_final/
+!results/benchmark_final/**
+

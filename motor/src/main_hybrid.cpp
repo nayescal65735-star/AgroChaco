@@ -14,12 +14,30 @@
 using namespace agrochaco;
 
 int main(int argc, char* argv[]) {
-    MPI_Init(&argc, &argv);
+    int provided = 0;
+
+    const int initResult = MPI_Init_thread(
+        &argc, &argv, MPI_THREAD_FUNNELED, &provided
+    );
+
+    if (initResult != MPI_SUCCESS) {
+        std::cerr << "[ERROR] No se pudo inicializar MPI.\n";
+        return 1;
+    }
 
     int rank = 0;
     int processCount = 1;
+
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &processCount);
+
+    if (provided < MPI_THREAD_FUNNELED) {
+        if (rank == 0) {
+            std::cerr << "[ERROR] MPI no proporciona MPI_THREAD_FUNNELED.\n";
+        }
+        MPI_Abort(MPI_COMM_WORLD, 1);
+        return 1;
+    }
 
     int exitCode = 0;
 

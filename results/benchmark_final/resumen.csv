@@ -1,0 +1,5 @@
+motor,trabajadores,promedio_segundos,mediana_segundos,speedup,eficiencia_porcentaje
+Secuencial,1,0.245,0.244,1.0,100.0
+OpenMP,16,0.0408,0.04,6.0049,37.53
+MPI,4,0.0682,0.067,3.5924,89.81
+Hibrido,16,0.1194,0.121,2.0519,12.82
