@@ -36,3 +36,7 @@ Thumbs.db
 # Resultados y datos generados
 results/*
 !results/.gitkeep
+
+# Publicar únicamente los benchmarks finales del motor AgroChaco
+!results/benchmark_final/
+!results/benchmark_final/**
