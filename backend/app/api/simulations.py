@@ -1,15 +1,29 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
+import json
+from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status as http_status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.db.repository import SimulationRepository
+from app.models.evento_ejecucion import EventoEjecucion
 from app.models.simulacion import Simulacion
+from app.services.motor_service import (
+    MotorExecutionError,
+    MotorNotFoundError,
+    MotorOutputError,
+    MotorSecurityError,
+    MotorService,
+    MotorServiceError,
+    MotorTimeoutError,
+    PROJECT_ROOT,
+)
 
 
 router = APIRouter(prefix="/api/simulations", tags=["Simulations"])
@@ -164,6 +178,9 @@ def _format_simulation_response(sim: Simulacion) -> dict[str, Any]:
         "progressPercent": 100 if sim.estado == "completed" else 0,
         "createdAt": created_iso,
         "completedAt": created_iso if sim.estado == "completed" else None,
+        "timelineData": [],
+        "spatialGrid": [],
+        "logs": [],
     }
 
     # Adjuntar métricas HPC si existen registradas en PostgreSQL
@@ -177,6 +194,49 @@ def _format_simulation_response(sim: Simulacion) -> dict[str, Any]:
     if sim.resultado:
         response_data["averageCWSI"] = float(sim.resultado.deficit_medio)
         response_data["soilMoistureFinalPercent"] = float(sim.resultado.agua_final_media)
+
+        # Recuperar JSON detallado desde archivo_detalle si existe en disco y es seguro
+        if sim.resultado.archivo_detalle:
+            archivo_path = Path(sim.resultado.archivo_detalle)
+            if not archivo_path.is_absolute():
+                archivo_path = PROJECT_ROOT / archivo_path
+
+            # Resolución canónica y comprobación estricta de confinamiento en results/simulations
+            allowed_dir = (PROJECT_ROOT / "results" / "simulations").resolve()
+            try:
+                archivo_path = archivo_path.resolve()
+                es_valido = archivo_path.is_relative_to(allowed_dir) and archivo_path.is_file()
+            except (OSError, RuntimeError):
+                es_valido = False
+
+            if es_valido:
+                try:
+                    with open(archivo_path, "r", encoding="utf-8") as f:
+                        detalles = json.load(f)
+
+                    if isinstance(detalles, dict):
+                        if "timelineData" in detalles:
+                            response_data["timelineData"] = detalles["timelineData"]
+                        if "spatialGrid" in detalles:
+                            response_data["spatialGrid"] = detalles["spatialGrid"]
+                        if "logs" in detalles:
+                            response_data["logs"] = detalles["logs"]
+                        if "yieldLossPercent" in detalles:
+                            response_data["yieldLossPercent"] = float(detalles["yieldLossPercent"])
+                        if "estimatedYieldTnHa" in detalles:
+                            response_data["estimatedYieldTnHa"] = float(detalles["estimatedYieldTnHa"])
+                        if "nominalYieldTnHa" in detalles:
+                            response_data["nominalYieldTnHa"] = float(detalles["nominalYieldTnHa"])
+                        if "waterDeficitMm" in detalles:
+                            response_data["waterDeficitMm"] = float(detalles["waterDeficitMm"])
+                        if "memoryUsageMb" in detalles:
+                            response_data["memoryUsageMb"] = float(detalles["memoryUsageMb"])
+                        if "currentDay" in detalles:
+                            response_data["currentDay"] = detalles["currentDay"]
+                        if "completedAt" in detalles and detalles["completedAt"]:
+                            response_data["completedAt"] = detalles["completedAt"]
+                except Exception:
+                    pass
 
     return response_data
 
@@ -247,8 +307,16 @@ def list_simulations(
 
 @router.get("/{simulation_id}")
 def get_simulation(simulation_id: str, db: Session = Depends(get_db)):
+    try:
+        sim_id_seguro = MotorService.validar_simulation_id(simulation_id)
+    except MotorSecurityError as err:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=f"Identificador de simulación inválido: {err}",
+        ) from err
+
     simulation = SimulationRepository.obtener_por_id(
-        db, simulation_id, cargar_relaciones=True
+        db, sim_id_seguro, cargar_relaciones=True
     )
 
     if simulation is None:
@@ -260,30 +328,120 @@ def get_simulation(simulation_id: str, db: Session = Depends(get_db)):
     return _format_simulation_response(simulation)
 
 
-@router.post("/{simulation_id}/execute", status_code=http_status.HTTP_501_NOT_IMPLEMENTED)
+@router.post("/{simulation_id}/execute", status_code=http_status.HTTP_200_OK)
 def execute_simulation(simulation_id: str, db: Session = Depends(get_db)):
+    # 1. Validación de seguridad en simulation_id (prevención de Path Traversal)
+    try:
+        sim_id_seguro = MotorService.validar_simulation_id(simulation_id)
+    except MotorSecurityError as err:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=f"Identificador de simulación inválido: {err}",
+        ) from err
+
+    # 2. Verificar existencia de la simulación
     simulation = SimulationRepository.obtener_por_id(
-        db, simulation_id, cargar_relaciones=False
+        db, sim_id_seguro, cargar_relaciones=True
     )
 
     if simulation is None:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="Simulación no encontrada.",
+            detail=f"Simulación '{sim_id_seguro}' no encontrada.",
         )
 
-    raise HTTPException(
-        status_code=http_status.HTTP_501_NOT_IMPLEMENTED,
-        detail=(
-            "La ejecución todavía no está disponible. "
-            "Se requiere integrar el motor de simulación."
-        ),
+    # 3. Transición atómica de estado en PostgreSQL:
+    # Bloquea la fila y actualiza solo si estado != 'running'
+    stmt = (
+        update(Simulacion)
+        .where(
+            Simulacion.id == sim_id_seguro,
+            Simulacion.estado != "running",
+        )
+        .values(estado="running")
     )
+    res = db.execute(stmt)
+
+    if res.rowcount == 0:
+        # Otra solicitud concurrente ya adquirió la ejecución
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=f"La simulación '{sim_id_seguro}' ya se encuentra en ejecución por otra solicitud.",
+        )
+
+    # Confirmar de inmediato la transición al estado 'running' y el evento de inicio
+    config_dict: dict[str, Any] = {}
+    if simulation.parametro and isinstance(simulation.parametro.configuracion_json, dict):
+        config_dict = dict(simulation.parametro.configuracion_json)
+
+    engine = str(config_dict.get("engine", "secuencial")).lower()
+
+    try:
+        evento_inicio = EventoEjecucion(
+            simulacion_id=sim_id_seguro,
+            nivel="INFO",
+            mensaje=f"Iniciando ejecución del motor '{engine}' en C++17.",
+        )
+        db.add(evento_inicio)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al registrar inicio de ejecución: {exc}",
+        ) from exc
+
+    # 4. Ejecución del motor C++17
+    try:
+        resultado_ejecucion = MotorService.ejecutar(
+            simulation_id=sim_id_seguro,
+            config_dict=config_dict,
+        )
+
+        # 5. Persistencia atómica de resultados biofísicos y métricas HPC en una sola transacción
+        MotorService.persistir_resultados_en_db(
+            db=db,
+            simulation_id=sim_id_seguro,
+            config_dict=config_dict,
+            resultado_ejecucion=resultado_ejecucion,
+        )
+
+    except Exception as error:
+        # En caso de fallo, marcar simulación como 'failed' y registrar evento de error
+        try:
+            SimulationRepository.actualizar_estado(db, sim_id_seguro, "failed")
+            SimulationRepository.registrar_evento(
+                db,
+                sim_id_seguro,
+                nivel="ERROR",
+                mensaje=f"Fallo en la ejecución del motor '{engine}': {error}",
+            )
+        except Exception:
+            pass
+
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error durante la ejecución del motor de simulación: {error}",
+        ) from error
+
+    # 6. Retornar simulación actualizada con sus resultados consolidados
+    sim_actualizada = SimulationRepository.obtener_por_id(
+        db, sim_id_seguro, cargar_relaciones=True
+    )
+    return _format_simulation_response(sim_actualizada or simulation)
 
 
 @router.delete("/{simulation_id}")
 def delete_simulation(simulation_id: str, db: Session = Depends(get_db)):
-    eliminado = SimulationRepository.eliminar_simulacion(db, simulation_id)
+    try:
+        sim_id_seguro = MotorService.validar_simulation_id(simulation_id)
+    except MotorSecurityError as err:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=f"Identificador de simulación inválido: {err}",
+        ) from err
+
+    eliminado = SimulationRepository.eliminar_simulacion(db, sim_id_seguro)
 
     if not eliminado:
         raise HTTPException(
@@ -293,5 +451,5 @@ def delete_simulation(simulation_id: str, db: Session = Depends(get_db)):
 
     return {
         "mensaje": "Simulación eliminada correctamente.",
-        "id": simulation_id,
+        "id": sim_id_seguro,
     }

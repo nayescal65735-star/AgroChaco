@@ -149,6 +149,7 @@ class SimulationRepository:
         db: Session,
         simulacion_id: str,
         datos_resultados: dict[str, Any],
+        commit: bool = True,
     ) -> Resultado:
         """Guarda o actualiza los resultados consolidados de una simulación."""
         try:
@@ -164,11 +165,15 @@ class SimulationRepository:
                 resultado = Resultado(simulacion_id=simulacion_id, **datos_resultados)
                 db.add(resultado)
 
-            db.commit()
-            db.refresh(resultado)
+            if commit:
+                db.commit()
+                db.refresh(resultado)
+            else:
+                db.flush()
             return resultado
         except Exception as error:
-            db.rollback()
+            if commit:
+                db.rollback()
             raise RuntimeError(
                 f"Error al guardar resultados para {simulacion_id}: {error}"
             ) from error
@@ -178,18 +183,57 @@ class SimulationRepository:
         db: Session,
         simulacion_id: str,
         datos_rendimiento: dict[str, Any],
+        commit: bool = True,
     ) -> Rendimiento:
         """Registra una corrida de rendimiento HPC asociada a la simulación."""
         try:
             rendimiento = Rendimiento(simulacion_id=simulacion_id, **datos_rendimiento)
             db.add(rendimiento)
-            db.commit()
-            db.refresh(rendimiento)
+            if commit:
+                db.commit()
+                db.refresh(rendimiento)
+            else:
+                db.flush()
             return rendimiento
+        except Exception as error:
+            if commit:
+                db.rollback()
+            raise RuntimeError(
+                f"Error al registrar rendimiento para {simulacion_id}: {error}"
+            ) from error
+
+    @staticmethod
+    def guardar_ejecucion_completa(
+        db: Session,
+        simulacion_id: str,
+        datos_resultados: dict[str, Any],
+        datos_rendimiento: dict[str, Any],
+        nuevo_estado: str = "completed",
+        mensaje_evento: str | None = None,
+    ) -> None:
+        """Persiste resultados biofísicos, métricas HPC, estado y evento en una única transacción atómica."""
+        try:
+            SimulationRepository.guardar_resultados(
+                db, simulacion_id, datos_resultados, commit=False
+            )
+            SimulationRepository.guardar_rendimiento(
+                db, simulacion_id, datos_rendimiento, commit=False
+            )
+            simulacion = db.get(Simulacion, simulacion_id)
+            if simulacion:
+                simulacion.estado = nuevo_estado
+            if mensaje_evento:
+                evento = EventoEjecucion(
+                    simulacion_id=simulacion_id,
+                    nivel="INFO",
+                    mensaje=mensaje_evento,
+                )
+                db.add(evento)
+            db.commit()
         except Exception as error:
             db.rollback()
             raise RuntimeError(
-                f"Error al registrar rendimiento para {simulacion_id}: {error}"
+                f"Error en persistencia atómica para {simulacion_id}: {error}"
             ) from error
 
     @staticmethod
