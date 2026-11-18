@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useSimulations } from '../context';
 import { Card } from '../components/common/Card';
 import { StatusBadge } from '../components/common/StatusBadge';
@@ -31,7 +31,13 @@ export function SimulationExecution() {
     startExecution,
   } = useSimulations();
   const navigate = useNavigate();
+  const location = useLocation();
 
+  const autoExecutionStarted = useRef<string | null>(null);
+
+  const autoExecuteId = (
+    location.state as { autoExecuteId?: string } | null
+  )?.autoExecuteId;
   const [isExecuting, setIsExecuting] = useState(false);
   const [executionError, setExecutionError] = useState<string | null>(null);
   const [executionSuccess, setExecutionSuccess] = useState<string | null>(null);
@@ -76,7 +82,31 @@ export function SimulationExecution() {
       setIsExecuting(false);
     }
   };
+    useEffect(() => {
+    if (!autoExecuteId) return;
 
+    if (autoExecutionStarted.current === autoExecuteId) {
+      return;
+    }
+
+    if (!runningSim || runningSim.id !== autoExecuteId) {
+      return;
+    }
+
+    autoExecutionStarted.current = autoExecuteId;
+
+    navigate(location.pathname, {
+      replace: true,
+      state: null,
+    });
+
+    void handleExecute();
+  }, [
+    autoExecuteId,
+    runningSim,
+    navigate,
+    location.pathname,
+  ]);
   if (!runningSim) {
     return (
       <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>

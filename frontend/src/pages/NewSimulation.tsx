@@ -28,6 +28,9 @@ export function NewSimulation() {
   const { createSimulation } = useSimulations();
   const navigate = useNavigate();
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
   // Form states
   const [name, setName] = useState('Simulación Sequía Gran Chaco 2026');
   const [zone, setZone] = useState<GranChacoZoneId>('villamontes');
@@ -79,29 +82,55 @@ export function NewSimulation() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    await createSimulation({
-      name,
-      zone,
-      zoneName: selectedZone.name,
-      department: selectedZone.department,
-      soilType,
-      cornVariety,
-      plantingDate,
-      simulationDays,
-      gridConfig: {
-        rows: gridRows,
-        cols: gridCols,
-        cellSizeMeters: cellSize,
-      },
-      initialMoisturePercent: initialMoisture,
-      droughtScenario,
-      engine,
-      openmpThreads: engine === 'openmp' || engine === 'hibrido' ? openmpThreads : undefined,
-      mpiProcesses: engine === 'mpi' || engine === 'hibrido' ? mpiProcesses : undefined,
-      nodesCount: engine === 'mpi' || engine === 'hibrido' ? nodesCount : 1,
-    });
+    if (isSubmitting) return;
 
-    navigate('/ejecucion');
+    setIsSubmitting(true);
+    setSubmitError(null);
+
+    try {
+      const simulationId = await createSimulation({
+        name,
+        zone,
+        zoneName: selectedZone.name,
+        department: selectedZone.department,
+        soilType,
+        cornVariety,
+        plantingDate,
+        simulationDays,
+        gridConfig: {
+          rows: gridRows,
+          cols: gridCols,
+          cellSizeMeters: cellSize,
+        },
+        initialMoisturePercent: initialMoisture,
+        droughtScenario,
+        engine,
+        openmpThreads:
+          engine === 'openmp' || engine === 'hibrido'
+            ? openmpThreads
+            : undefined,
+        mpiProcesses:
+          engine === 'mpi' || engine === 'hibrido'
+            ? mpiProcesses
+            : undefined,
+        nodesCount:
+          engine === 'mpi' || engine === 'hibrido'
+            ? nodesCount
+            : 1,
+      });
+
+      navigate('/ejecucion', {
+        state: { autoExecuteId: simulationId },
+      });
+    } catch (error) {
+      console.error('Error al crear la simulación:', error);
+
+      setSubmitError(
+        'No se pudo crear la simulación. Compruebe la conexión con el backend.'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -550,8 +579,15 @@ export function NewSimulation() {
               </div>
             </div>
 
+            {submitError && (
+              <div role="alert" className="error-message">
+                {submitError}
+              </div>
+            )}
+
             <button
               type="submit"
+              disabled={isSubmitting}
               className="btn btn-primary btn-lg"
               style={{
                 background: 'var(--agri-green-light)',
@@ -559,8 +595,11 @@ export function NewSimulation() {
               }}
             >
               <Play size={20} fill="#ffffff" />
-              Lanzar Simulación HPC
+              {isSubmitting
+                ? 'Creando simulación...'
+                : 'Lanzar Simulación HPC'}
             </button>
+
           </div>
         </Card>
       </form>
