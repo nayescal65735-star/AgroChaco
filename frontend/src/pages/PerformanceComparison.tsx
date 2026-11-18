@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSimulations } from '../context';
 import { Card } from '../components/common/Card';
 import { StatCard } from '../components/common/StatCard';
 import { EngineBadge } from '../components/common/EngineBadge';
@@ -28,8 +29,69 @@ import {
   Legend,
 } from 'recharts';
 
+export interface ExperimentalBenchmarkRecord {
+  engine: 'secuencial' | 'openmp' | 'mpi' | 'hibrido';
+  label: string;
+  recursos: string;
+  promedioSegundos: number;
+  medianaSegundos: number;
+  speedup: number;
+  eficienciaPorcentaje: number;
+  hardware: string;
+}
+
+// Mediciones experimentales reales obtenidas de results/benchmark_final/resumen.csv
+const EXPERIMENTAL_CPLUSPLUS_BENCHMARKS: ExperimentalBenchmarkRecord[] = [
+  {
+    engine: 'secuencial',
+    label: 'Secuencial C++17 (Línea Base T1)',
+    recursos: '1 hilo (mono-núcleo)',
+    promedioSegundos: 0.2450,
+    medianaSegundos: 0.2440,
+    speedup: 1.00,
+    eficienciaPorcentaje: 100.0,
+    hardware: 'Intel Core i7-13700 (Ubuntu 24.04)',
+  },
+  {
+    engine: 'openmp',
+    label: 'OpenMP Memoria Compartida',
+    recursos: '16 hilos',
+    promedioSegundos: 0.0408,
+    medianaSegundos: 0.0400,
+    speedup: 6.00,
+    eficienciaPorcentaje: 37.53,
+    hardware: 'Intel Core i7-13700 (Ubuntu 24.04)',
+  },
+  {
+    engine: 'mpi',
+    label: 'MPI Memoria Distribuida',
+    recursos: '4 procesos',
+    promedioSegundos: 0.0682,
+    medianaSegundos: 0.0670,
+    speedup: 3.59,
+    eficienciaPorcentaje: 89.81,
+    hardware: 'Intel Core i7-13700 (Ubuntu 24.04)',
+  },
+  {
+    engine: 'hibrido',
+    label: 'Híbrido MPI + OpenMP',
+    recursos: '2 procesos × 8 hilos (16 workers)',
+    promedioSegundos: 0.1194,
+    medianaSegundos: 0.1210,
+    speedup: 2.05,
+    eficienciaPorcentaje: 12.82,
+    hardware: 'Intel Core i7-13700 (Ubuntu 24.04)',
+  },
+];
+
 export function PerformanceComparison() {
-  const [selectedParadigm, setSelectedParadigm] = useState<'all' | 'openmp' | 'mpi' | 'hibrido'>('all');
+  const { simulations } = useSimulations();
+  const [selectedParadigm, setSelectedParadigm] = useState<'all' | 'secuencial' | 'openmp' | 'mpi' | 'hibrido'>('all');
+
+  // Corridas reales completadas en la base de datos de PostgreSQL
+  const realCompletedSimulations = simulations.filter(
+    (s) => s.status === 'completed' && s.executionTimeSeconds != null
+  );
 
   const filteredData =
     selectedParadigm === 'all'
@@ -53,18 +115,25 @@ export function PerformanceComparison() {
         <div>
           <h1 className="page-title">Comparación de Rendimiento HPC</h1>
           <p className="page-description">
-            Evaluación empírica y teórica de escalabilidad: Secuencial vs OpenMP vs MPI vs Híbrido en el clúster
+            Evaluación empírica y experimental de escalabilidad: Secuencial vs OpenMP vs MPI vs Híbrido en el clúster
             Chaco.
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <button
             type="button"
             className={`btn btn-sm ${selectedParadigm === 'all' ? 'btn-primary' : 'btn-outline'}`}
             onClick={() => setSelectedParadigm('all')}
           >
             Todos los Motores
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm ${selectedParadigm === 'secuencial' ? 'btn-primary' : 'btn-outline'}`}
+            onClick={() => setSelectedParadigm('secuencial')}
+          >
+            Secuencial (T1)
           </button>
           <button
             type="button"
@@ -90,38 +159,215 @@ export function PerformanceComparison() {
         </div>
       </div>
 
-      {/* HPC Performance Headline Stats */}
+      {/* HPC Performance Headline Stats (Basados en las mediciones experimentales de resumen.csv) */}
       <div className="stats-grid">
         <StatCard
           label="Tiempo Línea Base (T1)"
-          value="342.5 s"
-          subtext="Secuencial Mono-núcleo C++"
+          value="0.2450 s"
+          subtext="Secuencial Mono-hilo C++17 (Ubuntu 24.04)"
           icon={<Clock size={24} />}
           variant="default"
         />
         <StatCard
-          label="Mejor Tiempo Clúster"
-          value="13.2 s"
-          subtext="Híbrido 4 Nodos x 8 Hilos (32 cores)"
+          label="Mejor Tiempo Medido"
+          value="0.0408 s"
+          subtext="OpenMP con 16 hilos (Malla 500×500)"
           icon={<Zap size={24} />}
           variant="gold"
           badge="Máxima Rapidez"
         />
         <StatCard
-          label="Speedup Máximo Alcanzado"
-          value="25.95×"
-          subtext="Aceleración respecto a mono-núcleo"
+          label="Speedup Máximo Medido"
+          value="6.00×"
+          subtext="Aceleración OpenMP vs Línea Base T1"
           icon={<TrendingUp size={24} />}
           variant="agri"
         />
         <StatCard
-          label="Eficiencia Paralela Pico"
-          value="97.2%"
-          subtext="OpenMP con 2 hilos (mínimo overhead)"
+          label="Eficiencia MPI Medida"
+          value="89.81%"
+          subtext="MPI con 4 procesos (Mínimo overhead)"
           icon={<Server size={24} />}
           variant="info"
         />
       </div>
+
+      {/* Real Executions Table from PostgreSQL */}
+      {realCompletedSimulations.length > 0 && (
+        <Card
+          className="mb-6"
+          title={
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Zap size={20} color="var(--agri-green)" />
+              <span>Corridas Reales Registradas en Base de Datos (PostgreSQL / FastAPI)</span>
+            </div>
+          }
+          subtitle={`Simulaciones biofísicas ejecutadas con los motores C++17 (${realCompletedSimulations.length} corridas registradas)`}
+        >
+          <div className="table-container">
+            <table className="agro-table">
+              <thead>
+                <tr>
+                  <th>ID Simulación</th>
+                  <th>Nombre</th>
+                  <th>Modalidad</th>
+                  <th>Recursos HPC</th>
+                  <th>Malla / Días</th>
+                  <th>Tiempo ($T_p$)</th>
+                  <th>Speedup ($S_p$)</th>
+                  <th>Eficiencia ($E_p$)</th>
+                  <th>Estrés CWSI</th>
+                </tr>
+              </thead>
+              <tbody>
+                {realCompletedSimulations
+                  .filter((s) => selectedParadigm === 'all' || s.config.engine === selectedParadigm)
+                  .map((sim) => {
+                    const threads = sim.config.openmpThreads || 1;
+                    const procs = sim.config.mpiProcesses || 1;
+                    const resourcesLabel =
+                      sim.config.engine === 'secuencial'
+                        ? '1 hilo (mono-núcleo)'
+                        : sim.config.engine === 'openmp'
+                        ? `${threads} hilos OpenMP`
+                        : sim.config.engine === 'mpi'
+                        ? `${procs} procesos MPI`
+                        : `${procs} procs × ${threads} hilos (${procs * threads} cores)`;
+
+                    const effVal =
+                      sim.efficiency != null
+                        ? sim.efficiency <= 1
+                          ? sim.efficiency * 100
+                          : sim.efficiency
+                        : null;
+
+                    return (
+                      <tr key={sim.id}>
+                        <td>
+                          <code style={{ fontWeight: 700 }}>{sim.id}</code>
+                        </td>
+                        <td>
+                          <span style={{ fontWeight: 600, color: 'var(--navy)' }}>{sim.config.name}</span>
+                        </td>
+                        <td>
+                          <EngineBadge
+                            engine={sim.config.engine}
+                            threads={sim.config.openmpThreads}
+                            processes={sim.config.mpiProcesses}
+                          />
+                        </td>
+                        <td>{resourcesLabel}</td>
+                        <td>
+                          {sim.config.gridConfig.rows}x{sim.config.gridConfig.cols} ({sim.config.simulationDays}d)
+                        </td>
+                        <td>
+                          <strong style={{ color: 'var(--navy)' }}>
+                            {sim.executionTimeSeconds != null ? `${sim.executionTimeSeconds.toFixed(4)} s` : '-'}
+                          </strong>
+                        </td>
+                        <td>
+                          <span style={{ fontWeight: 700, color: 'var(--agri-green)' }}>
+                            {sim.speedup != null ? `${sim.speedup.toFixed(2)}×` : '-'}
+                          </span>
+                        </td>
+                        <td>
+                          {effVal != null ? `${effVal.toFixed(1)}%` : '-'}
+                        </td>
+                        <td>
+                          {sim.averageCWSI != null ? sim.averageCWSI.toFixed(3) : '-'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/* Official Experimental Baseline C++17 Table */}
+      <Card
+        className="mb-6"
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Server size={20} color="var(--navy)" />
+            <span>Línea Base Experimental de Motores C++17 (results/benchmark_final/resumen.csv)</span>
+          </div>
+        }
+        subtitle="Mediciones experimentales reproducibles sobre 250.000 celdas (500×500) y 120 días en Intel Core i7-13700 (Ubuntu 24.04)"
+      >
+        <div className="table-container">
+          <table className="agro-table">
+            <thead>
+              <tr>
+                <th>Modalidad</th>
+                <th>Recursos / Trabajadores</th>
+                <th>Tiempo Promedio ($T_p$)</th>
+                <th>Tiempo Mediana</th>
+                <th>Speedup ($S_p$)</th>
+                <th>Eficiencia ($E_p$)</th>
+                <th>Entorno de Prueba</th>
+              </tr>
+            </thead>
+            <tbody>
+              {EXPERIMENTAL_CPLUSPLUS_BENCHMARKS
+                .filter((item) => selectedParadigm === 'all' || item.engine === selectedParadigm)
+                .map((item, idx) => (
+                  <tr key={idx}>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <EngineBadge engine={item.engine} />
+                        <span style={{ fontWeight: 600, color: 'var(--navy)' }}>{item.label}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <strong>{item.recursos}</strong>
+                    </td>
+                    <td>
+                      <strong style={{ color: 'var(--navy)' }}>{item.promedioSegundos.toFixed(4)} s</strong>
+                    </td>
+                    <td>{item.medianaSegundos.toFixed(4)} s</td>
+                    <td>
+                      <span
+                        style={{
+                          fontWeight: 700,
+                          color: item.speedup > 3 ? 'var(--gold-dark)' : item.speedup > 1 ? 'var(--agri-green)' : 'inherit',
+                        }}
+                      >
+                        {item.speedup.toFixed(2)}×
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <span>{item.eficienciaPorcentaje.toFixed(2)}%</span>
+                        <div
+                          style={{
+                            width: '45px',
+                            height: '6px',
+                            background: '#e2e8f0',
+                            borderRadius: '3px',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: `${Math.min(100, item.eficienciaPorcentaje)}%`,
+                              height: '100%',
+                              background: item.eficienciaPorcentaje >= 80 ? 'var(--agri-green)' : 'var(--status-warning)',
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <span className="system-tag">{item.hardware}</span>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
 
       {/* Strong Scaling Chart & Communication Breakdown */}
       <div

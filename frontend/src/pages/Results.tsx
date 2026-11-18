@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useSimulations } from '../context';
 import { Card } from '../components/common/Card';
 import { StatCard } from '../components/common/StatCard';
@@ -27,6 +28,7 @@ import {
 
 export function Results() {
   const { simulations, activeSimulation, setActiveSimulationId } = useSimulations();
+  const navigate = useNavigate();
   const [selectedCell, setSelectedCell] = useState<SpatialCell | null>(null);
 
   const currentSim = activeSimulation || simulations[0];
@@ -112,29 +114,29 @@ export function Results() {
       <div className="stats-grid">
         <StatCard
           label="Rendimiento Estimado"
-          value={`${currentSim.estimatedYieldTnHa} tn/ha`}
-          subtext={`Pérdida del ${currentSim.yieldLossPercent}% vs potencial (${currentSim.nominalYieldTnHa} tn/ha)`}
+          value={currentSim.estimatedYieldTnHa != null ? `${currentSim.estimatedYieldTnHa.toFixed(2)} tn/ha` : 'Pendiente'}
+          subtext={currentSim.yieldLossPercent != null ? `Pérdida del ${currentSim.yieldLossPercent.toFixed(1)}% vs potencial (${currentSim.nominalYieldTnHa ?? 5.4} tn/ha)` : 'Requiere ejecutar el motor C++'}
           icon={<Wheat size={24} />}
           variant="danger"
         />
         <StatCard
           label="Déficit Hídrico Acumulado"
-          value={`${currentSim.waterDeficitMm} mm`}
+          value={currentSim.waterDeficitMm != null ? `${currentSim.waterDeficitMm.toFixed(1)} mm` : 'Pendiente'}
           subtext="Lámina de agua no satisfecha en ciclo"
           icon={<Droplets size={24} />}
           variant="agri"
         />
         <StatCard
           label="Estrés Hídrico Medio (CWSI)"
-          value={currentSim.averageCWSI !== undefined ? currentSim.averageCWSI.toFixed(3) : 'Sin datos'}
+          value={currentSim.averageCWSI != null ? currentSim.averageCWSI.toFixed(3) : 'Pendiente'}
           subtext="Crop Water Stress Index promedio"
           icon={<Activity size={24} />}
           variant="gold"
         />
         <StatCard
           label="Tiempo de Cómputo HPC"
-          value={`${currentSim.executionTimeSeconds}s`}
-          subtext={`Speedup: ${currentSim.speedup}x (${currentSim.efficiency}% eficiencia)`}
+          value={currentSim.executionTimeSeconds != null ? `${currentSim.executionTimeSeconds.toFixed(3)}s` : 'Pendiente'}
+          subtext={currentSim.speedup != null ? `Speedup: ${currentSim.speedup.toFixed(2)}x (${(currentSim.efficiency != null ? (currentSim.efficiency <= 1 ? currentSim.efficiency * 100 : currentSim.efficiency).toFixed(1) : '100')}% eficiencia)` : 'Pendiente de ejecución'}
           icon={<Layers size={24} />}
           variant="default"
         />
@@ -151,88 +153,114 @@ export function Results() {
         }
         subtitle="Evolución de evapotranspiración potencial vs real, humedad del suelo y lluvias durante los 120 días de cultivo"
       >
-        <div style={{ height: '360px', width: '100%', marginTop: '0.5rem' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={currentSim.timelineData} margin={{ top: 15, right: 20, left: 0, bottom: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis
-                dataKey="day"
-                label={{ value: 'Día desde la Siembra', position: 'insideBottom', offset: -10, fontSize: 12 }}
-              />
-              <YAxis
-                yAxisId="left"
-                label={{ value: 'Lámina (mm/día)', angle: -90, position: 'insideLeft', fontSize: 12 }}
-              />
-              <YAxis
-                yAxisId="right"
-                orientation="right"
-                domain={[0, 30]}
-                label={{ value: 'Humedad Suelo (%)', angle: 90, position: 'insideRight', fontSize: 12 }}
-              />
-              <Tooltip
-                contentStyle={{
-                  borderRadius: '8px',
-                  borderColor: '#cbd5e1',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+        {currentSim.timelineData.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '3rem 1rem', background: 'var(--bg-main)', borderRadius: 'var(--radius-md)', margin: '1rem 0' }}>
+            <Activity size={36} color="var(--text-muted)" style={{ marginBottom: '0.75rem' }} />
+            <h3 style={{ fontSize: '1.05rem', color: 'var(--navy)', marginBottom: '0.5rem' }}>
+              Sin datos temporales registrados
+            </h3>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', maxWidth: '500px', margin: '0 auto 1.25rem' }}>
+              {currentSim.status === 'completed'
+                ? 'Esta corrida no contiene puntos temporales detallados en su archivo de resultados.'
+                : `Esta simulación se encuentra en estado "${currentSim.status}". Para visualizar la curva hidrológica diaria, inicie la ejecución con el motor C++.`}
+            </p>
+            {currentSim.status !== 'completed' && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => {
+                  setActiveSimulationId(currentSim.id);
+                  navigate('/ejecucion');
                 }}
-              />
-              <Legend verticalAlign="top" height={36} />
+              >
+                Ir a Ejecutar Simulación
+              </button>
+            )}
+          </div>
+        ) : (
+          <div style={{ height: '360px', width: '100%', marginTop: '0.5rem' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={currentSim.timelineData} margin={{ top: 15, right: 20, left: 0, bottom: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis
+                  dataKey="day"
+                  label={{ value: 'Día desde la Siembra', position: 'insideBottom', offset: -10, fontSize: 12 }}
+                />
+                <YAxis
+                  yAxisId="left"
+                  label={{ value: 'Lámina (mm/día)', angle: -90, position: 'insideLeft', fontSize: 12 }}
+                />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  domain={[0, 30]}
+                  label={{ value: 'Humedad Suelo (%)', angle: 90, position: 'insideRight', fontSize: 12 }}
+                />
+                <Tooltip
+                  contentStyle={{
+                    borderRadius: '8px',
+                    borderColor: '#cbd5e1',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                  }}
+                />
+                <Legend verticalAlign="top" height={36} />
 
-              {/* Rain bars */}
-              <Bar
-                yAxisId="left"
-                dataKey="precipitation"
-                name="Precipitación (mm)"
-                fill="#38bdf8"
-                barSize={8}
-                radius={[4, 4, 0, 0]}
-              />
+                {/* Rain bars */}
+                <Bar
+                  yAxisId="left"
+                  dataKey="precipitation"
+                  name="Precipitación (mm)"
+                  fill="#38bdf8"
+                  barSize={8}
+                  radius={[4, 4, 0, 0]}
+                />
 
-              {/* Potential ET line */}
-              <Line
-                yAxisId="left"
-                type="monotone"
-                dataKey="etPotential"
-                name="ET Potencial ETc (mm)"
-                stroke="#d97706"
-                strokeWidth={2}
-                strokeDasharray="4 4"
-                dot={false}
-              />
+                {/* Potential ET line */}
+                <Line
+                  yAxisId="left"
+                  type="monotone"
+                  dataKey="etPotential"
+                  name="ET Potencial ETc (mm)"
+                  stroke="#d97706"
+                  strokeWidth={2}
+                  strokeDasharray="4 4"
+                  dot={false}
+                />
 
-              {/* Actual ET area */}
-              <Area
-                yAxisId="left"
-                type="monotone"
-                dataKey="etActual"
-                name="ET Real ETa (mm)"
-                stroke="var(--agri-green)"
-                fill="var(--agri-green-subtle)"
-                strokeWidth={2.5}
-              />
+                {/* Actual ET area */}
+                <Area
+                  yAxisId="left"
+                  type="monotone"
+                  dataKey="etActual"
+                  name="ET Real ETa (mm)"
+                  stroke="var(--agri-green)"
+                  fill="var(--agri-green-subtle)"
+                  strokeWidth={2.5}
+                />
 
-              {/* Soil moisture line */}
-              <Line
-                yAxisId="right"
-                type="monotone"
-                dataKey="soilMoisture"
-                name="Humedad del Suelo (%)"
-                stroke="#2563eb"
-                strokeWidth={2}
-                dot={false}
-              />
+                {/* Soil moisture line */}
+                <Line
+                  yAxisId="right"
+                  type="monotone"
+                  dataKey="soilMoisture"
+                  name="Humedad del Suelo (%)"
+                  stroke="#2563eb"
+                  strokeWidth={2}
+                  dot={false}
+                />
 
-              {/* Reference line for Wilting Point */}
-              <ReferenceLine
-                yAxisId="right"
-                y={8.2}
-                label={{ value: 'Punto de Marchitez (8.2%)', fill: '#dc2626', fontSize: 11 }}
-                stroke="#dc2626"
-                strokeDasharray="3 3"
-              />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
+                {/* Reference line for Wilting Point */}
+                <ReferenceLine
+                  yAxisId="right"
+                  y={8.2}
+                  label={{ value: 'Punto de Marchitez (8.2%)', fill: '#dc2626', fontSize: 11 }}
+                  stroke="#dc2626"
+                  strokeDasharray="3 3"
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        )}
 
         {/* Phenological stages explanation bar */}
         <div
@@ -309,31 +337,42 @@ export function Results() {
             </div>
           </div>
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(8, 1fr)',
-              gap: '6px',
-              padding: '12px',
-              background: 'var(--bg-main)',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--border-color)',
-            }}
-          >
-            {currentSim.spatialGrid.map((cell, idx) => (
-              <div
-                key={idx}
-                className="grid-cell"
-                style={{
-                  backgroundColor: getCellColor(cell.cwsi),
-                  height: '42px',
-                }}
-                onMouseEnter={() => setSelectedCell(cell)}
-              >
-                {cell.cwsi.toFixed(2)}
-              </div>
-            ))}
-          </div>
+          {currentSim.spatialGrid.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2.5rem 1rem', background: 'var(--bg-main)', borderRadius: 'var(--radius-md)' }}>
+              <Layers size={32} color="var(--text-muted)" style={{ marginBottom: '0.5rem' }} />
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                {currentSim.status === 'completed'
+                  ? 'No hay matriz espacial 2D registrada para esta corrida.'
+                  : 'La distribución espacial del estrés se calculará al ejecutar la simulación con el motor C++.'}
+              </p>
+            </div>
+          ) : (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(8, 1fr)',
+                gap: '6px',
+                padding: '12px',
+                background: 'var(--bg-main)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--border-color)',
+              }}
+            >
+              {currentSim.spatialGrid.map((cell, idx) => (
+                <div
+                  key={idx}
+                  className="grid-cell"
+                  style={{
+                    backgroundColor: getCellColor(cell.cwsi),
+                    height: '42px',
+                  }}
+                  onMouseEnter={() => setSelectedCell(cell)}
+                >
+                  {cell.cwsi.toFixed(2)}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Cell inspector box */}
           <div
@@ -395,7 +434,7 @@ export function Results() {
                 Recomendación de Manejo y Riego Estratégico
               </div>
               <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '0.3rem' }}>
-                Para mitigar la pérdida proyectada de {currentSim.yieldLossPercent}%, se aconseja la aplicación de un riego suplementario
+                Para mitigar la pérdida proyectada de {currentSim.yieldLossPercent != null ? `${currentSim.yieldLossPercent.toFixed(1)}%` : 'rendimiento'}, se aconseja la aplicación de un riego suplementario
                 de 45 mm entre los días 45 y 55 del ciclo en la zona de {currentSim.config.zoneName}.
               </p>
             </div>

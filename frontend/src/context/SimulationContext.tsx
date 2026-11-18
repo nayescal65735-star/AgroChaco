@@ -1,3 +1,4 @@
+
 import {
   useState,
   useEffect,
@@ -19,23 +20,46 @@ import {
 
 import { SimulationContext } from './simulationContextDef';
 
-function mapBackendSimulation(data: BackendSimulation): SimulationResult {
+/**
+ * Convierte la respuesta del backend al formato utilizado
+ * por el frontend, conservando las métricas y resultados.
+ */
+function mapBackendSimulation(
+  data: BackendSimulation
+): SimulationResult {
   return {
     id: data.id,
+
     config: {
       ...data.config,
       id: data.id,
       createdAt: data.createdAt,
     },
+
     status: data.status,
     progressPercent: data.progressPercent,
     createdAt: data.createdAt,
     completedAt: data.completedAt || undefined,
 
-    // Estos datos se completarán cuando se integre el motor.
-    timelineData: [],
-    spatialGrid: [],
-    logs: [],
+    // Métricas agronómicas
+    currentDay: data.currentDay,
+    averageCWSI: data.averageCWSI,
+    soilMoistureFinalPercent: data.soilMoistureFinalPercent,
+    yieldLossPercent: data.yieldLossPercent,
+    estimatedYieldTnHa: data.estimatedYieldTnHa,
+    nominalYieldTnHa: data.nominalYieldTnHa,
+    waterDeficitMm: data.waterDeficitMm,
+
+    // Métricas de rendimiento paralelo
+    executionTimeSeconds: data.executionTimeSeconds,
+    speedup: data.speedup,
+    efficiency: data.efficiency,
+    memoryUsageMb: data.memoryUsageMb,
+
+    // Resultados detallados
+    timelineData: data.timelineData ?? [],
+    spatialGrid: data.spatialGrid ?? [],
+    logs: data.logs ?? [],
   };
 }
 
@@ -45,55 +69,72 @@ export function SimulationProvider({
   children: ReactNode;
 }) {
   const [simulations, setSimulations] = useState<SimulationResult[]>([]);
+
   const [activeSimulationId, setActiveSimulationId] =
     useState<string | null>(null);
 
-  const [systemHealth, setSystemHealth] = useState<SystemHealthStatus>({
-    backend: 'checking',
-    database: 'checking',
-    clusterNodes: 0,
-    activeJobs: 0,
-  });
+  const [systemHealth, setSystemHealth] =
+    useState<SystemHealthStatus>({
+      backend: 'checking',
+      database: 'checking',
+      clusterNodes: 0,
+      activeJobs: 0,
+    });
 
   const activeSimulation =
-    simulations.find((s) => s.id === activeSimulationId) || null;
+    simulations.find((simulation) => simulation.id === activeSimulationId) ||
+    null;
 
   const isExecutionActive = simulations.some(
-    (s) => s.status === 'running'
+    (simulation) => simulation.status === 'running'
   );
 
+  // Mantener una simulación activa válida.
   useEffect(() => {
     if (
       activeSimulationId &&
-      !simulations.some((s) => s.id === activeSimulationId)
+      !simulations.some(
+        (simulation) => simulation.id === activeSimulationId
+      )
     ) {
       setActiveSimulationId(simulations[0]?.id || null);
     }
   }, [simulations, activeSimulationId]);
 
+  // Cargar simulaciones desde el backend.
   const loadSimulations = useCallback(async () => {
     try {
       const response = await simulationService.list();
 
-      const records = response.simulations.map(mapBackendSimulation);
+      const records = response.simulations.map(
+        mapBackendSimulation
+      );
 
       setSimulations(records);
 
       setActiveSimulationId((currentId) => {
-        if (currentId && records.some((s) => s.id === currentId)) {
+        if (
+          currentId &&
+          records.some((simulation) => simulation.id === currentId)
+        ) {
           return currentId;
         }
 
         return records[0]?.id || null;
       });
     } catch (error) {
-      console.error('No se pudieron cargar las simulaciones:', error);
+      console.error(
+        'No se pudieron cargar las simulaciones:',
+        error
+      );
     }
   }, []);
 
+  // Consultar el estado del backend y la base de datos.
   const refreshSystemHealth = useCallback(async () => {
     try {
       const status = await systemService.getFullSystemStatus();
+
       setSystemHealth(status);
     } catch {
       setSystemHealth({
@@ -105,24 +146,32 @@ export function SimulationProvider({
     }
   }, []);
 
+  // Carga inicial y actualización periódica del estado del sistema.
   useEffect(() => {
     loadSimulations();
     refreshSystemHealth();
 
-    const interval = setInterval(refreshSystemHealth, 30000);
+    const interval = setInterval(
+      refreshSystemHealth,
+      30000
+    );
 
     return () => clearInterval(interval);
   }, [loadSimulations, refreshSystemHealth]);
 
+  // Crear una simulación.
   const createSimulation = async (
     config: Omit<SimulationConfig, 'id' | 'createdAt'>
   ): Promise<string> => {
     const response = await simulationService.create(config);
+
     const newSimulation = mapBackendSimulation(response);
 
     setSimulations((previous) => [
       newSimulation,
-      ...previous.filter((s) => s.id !== newSimulation.id),
+      ...previous.filter(
+        (simulation) => simulation.id !== newSimulation.id
+      ),
     ]);
 
     setActiveSimulationId(newSimulation.id);
@@ -130,28 +179,57 @@ export function SimulationProvider({
     return newSimulation.id;
   };
 
+  // Ejecutar una simulación utilizando el motor C++ del backend.
   const startExecution = async (id: string): Promise<void> => {
-    const response = await simulationService.execute(id);
-    const updatedSimulation = mapBackendSimulation(response);
+    try {
+      const response = await simulationService.execute(id);
 
-    setSimulations((previous) =>
-      previous.map((s) =>
-        s.id === id ? updatedSimulation : s
-      )
-    );
+      const updatedSimulation = mapBackendSimulation(response);
+
+      setSimulations((previous) => {
+        const exists = previous.some(
+          (simulation) => simulation.id === id
+        );
+
+        if (!exists) {
+          return [updatedSimulation, ...previous];
+        }
+
+        return previous.map((simulation) =>
+          simulation.id === id
+            ? updatedSimulation
+            : simulation
+        );
+      });
+
+      setActiveSimulationId(id);
+    } catch (error) {
+      console.error(
+        `Error al ejecutar la simulación ${id}:`,
+        error
+      );
+
+      throw error;
+    }
   };
 
+  // La pausa todavía no está implementada en el backend.
   const stopExecution = (_id: string): void => {
     console.warn(
       'La pausa de simulaciones estará disponible cuando se integre el motor.'
     );
   };
 
+  // Eliminar una simulación.
   const deleteSimulation = async (id: string): Promise<void> => {
     await simulationService.delete(id);
 
     setSimulations((previous) =>
-      previous.filter((s) => s.id !== id)
+      previous.filter((simulation) => simulation.id !== id)
+    );
+
+    setActiveSimulationId((currentId) =>
+      currentId === id ? null : currentId
     );
   };
 

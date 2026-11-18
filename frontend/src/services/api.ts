@@ -1,27 +1,48 @@
+
 import axios from 'axios';
 import type {
   SystemHealthStatus,
   SimulationConfig,
+  SimulationStatus,
+  TimelineDataPoint,
+  SpatialCell,
+  SimulationLog,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001';
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: 120000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Estructura que devuelve FastAPI
+// Estructura real devuelta por FastAPI
 export interface BackendSimulation {
   id: string;
   config: Omit<SimulationConfig, 'id' | 'createdAt'>;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'paused';
+  status: SimulationStatus;
   progressPercent: number;
   createdAt: string;
   completedAt: string | null;
+
+  currentDay?: number;
+  executionTimeSeconds?: number;
+  speedup?: number;
+  efficiency?: number;
+  averageCWSI?: number;
+  soilMoistureFinalPercent?: number;
+  yieldLossPercent?: number;
+  estimatedYieldTnHa?: number;
+  nominalYieldTnHa?: number;
+  waterDeficitMm?: number;
+  memoryUsageMb?: number;
+
+  timelineData?: TimelineDataPoint[];
+  spatialGrid?: SpatialCell[];
+  logs?: SimulationLog[];
 }
 
 export interface SimulationListResponse {
@@ -81,7 +102,7 @@ export const systemService = {
   },
 };
 
-// Operaciones reales de simulaciones en FastAPI
+// Operaciones de simulaciones en FastAPI
 export const simulationService = {
   async create(
     config: Omit<SimulationConfig, 'id' | 'createdAt'>
@@ -116,7 +137,9 @@ export const simulationService = {
 
   async execute(id: string): Promise<BackendSimulation> {
     const response = await apiClient.post<BackendSimulation>(
-      `/api/simulations/${id}/execute`
+      `/api/simulations/${id}/execute`,
+      {},
+      { timeout: 120000 }
     );
 
     return response.data;

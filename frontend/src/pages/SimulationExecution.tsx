@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSimulations } from '../context';
 import { Card } from '../components/common/Card';
@@ -8,6 +9,9 @@ import {
   Activity,
   CheckCircle2,
   ArrowRight,
+  Play,
+  RefreshCw,
+  AlertCircle,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -24,11 +28,54 @@ export function SimulationExecution() {
     simulations,
     activeSimulation,
     setActiveSimulationId,
+    startExecution,
   } = useSimulations();
   const navigate = useNavigate();
 
-  // If there's no active simulation selected, pick running or latest
-  const runningSim = simulations.find((s) => s.status === 'running') || activeSimulation || simulations[0];
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [executionError, setExecutionError] = useState<string | null>(null);
+  const [executionSuccess, setExecutionSuccess] = useState<string | null>(null);
+
+  // Seleccionar la simulación activa, una en ejecución o la primera disponible
+  const runningSim = activeSimulation || simulations.find((s) => s.status === 'running') || simulations[0];
+
+  const handleExecute = async () => {
+    if (!runningSim || !runningSim.id || typeof runningSim.id !== 'string') {
+      setExecutionError('Identificador de simulación inválido o inexistente.');
+      return;
+    }
+
+    if (runningSim.status === 'running' || isExecuting) {
+      return;
+    }
+
+    setExecutionError(null);
+    setExecutionSuccess(null);
+    setIsExecuting(true);
+
+    try {
+      await startExecution(runningSim.id);
+      setExecutionSuccess(
+        `Simulación '${runningSim.config.name}' (${runningSim.id}) completada exitosamente con el motor C++.`
+      );
+    } catch (err: unknown) {
+      let message = 'Error durante la ejecución del motor de simulación.';
+      if (err && typeof err === 'object') {
+        const anyErr = err as {
+          response?: { data?: { detail?: string } };
+          message?: string;
+        };
+        if (anyErr.response?.data?.detail) {
+          message = anyErr.response.data.detail;
+        } else if (anyErr.message) {
+          message = anyErr.message;
+        }
+      }
+      setExecutionError(message);
+    } finally {
+      setIsExecuting(false);
+    }
+  };
 
   if (!runningSim) {
     return (
@@ -69,12 +116,16 @@ export function SimulationExecution() {
           </p>
         </div>
 
-        {/* Quick selector of active simulation */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        {/* Quick selector of active simulation and action button */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           <select
             className="form-select"
             value={runningSim.id}
-            onChange={(e) => setActiveSimulationId(e.target.value)}
+            onChange={(e) => {
+              setActiveSimulationId(e.target.value);
+              setExecutionError(null);
+              setExecutionSuccess(null);
+            }}
             style={{ width: 'auto', fontWeight: 600 }}
           >
             {simulations.map((s) => (
@@ -86,14 +137,95 @@ export function SimulationExecution() {
 
           <button
             type="button"
-            className="btn btn-outline"
-            disabled
-            title="Disponible cuando se integre el motor HPC"
+            className={`btn ${runningSim.status === 'completed' ? 'btn-outline' : 'btn-primary'}`}
+            disabled={isExecuting || runningSim.status === 'running'}
+            onClick={handleExecute}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            title={
+              isExecuting || runningSim.status === 'running'
+                ? 'Ejecución en curso...'
+                : runningSim.status === 'completed'
+                ? 'Re-ejecutar simulación con motor C++'
+                : 'Iniciar ejecución en motor C++'
+            }
           >
-            Motor HPC pendiente de integración
+            {isExecuting || runningSim.status === 'running' ? (
+              <>
+                <RefreshCw size={16} className="animate-spin" />
+                <span>Ejecutando motor C++...</span>
+              </>
+            ) : runningSim.status === 'completed' ? (
+              <>
+                <RefreshCw size={16} />
+                <span>Re-ejecutar Motor</span>
+              </>
+            ) : (
+              <>
+                <Play size={16} />
+                <span>Ejecutar Simulación HPC</span>
+              </>
+            )}
           </button>
         </div>
       </div>
+
+      {/* Execution Error Banner */}
+      {executionError && (
+        <div
+          style={{
+            padding: '1rem',
+            marginBottom: '1.25rem',
+            borderRadius: 'var(--radius-md)',
+            background: '#fef2f2',
+            border: '1px solid #fecaca',
+            color: '#991b1b',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+          }}
+        >
+          <AlertCircle size={20} />
+          <div style={{ flex: 1, fontSize: '0.9rem' }}>
+            <strong>Error de ejecución:</strong> {executionError}
+          </div>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline"
+            onClick={() => setExecutionError(null)}
+            style={{ borderColor: '#fca5a5', color: '#991b1b' }}
+          >
+            Cerrar
+          </button>
+        </div>
+      )}
+
+      {/* Execution Success Banner */}
+      {executionSuccess && (
+        <div
+          style={{
+            padding: '1rem',
+            marginBottom: '1.25rem',
+            borderRadius: 'var(--radius-md)',
+            background: '#f0fdf4',
+            border: '1px solid #bbf7d0',
+            color: '#166534',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+          }}
+        >
+          <CheckCircle2 size={20} />
+          <div style={{ flex: 1, fontSize: '0.9rem' }}>{executionSuccess}</div>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline"
+            onClick={() => setExecutionSuccess(null)}
+            style={{ borderColor: '#86efac', color: '#166534' }}
+          >
+            Cerrar
+          </button>
+        </div>
+      )}
 
       {/* Main Execution Banner / Status Card */}
       <Card
@@ -203,7 +335,7 @@ export function SimulationExecution() {
                 ? `${runningSim.speedup.toFixed(2)}×`
                 : 'Pendiente'}
               {' '}({runningSim.efficiency != null
-                ? `${runningSim.efficiency.toFixed(1)}% Efic.`
+                ? `${(runningSim.efficiency <= 1 ? runningSim.efficiency * 100 : runningSim.efficiency).toFixed(1)}% Efic.`
                 : 'Eficiencia pendiente'})
             </div>
           </div>
@@ -323,7 +455,9 @@ export function SimulationExecution() {
               <div className="terminal-line">
                 <span className="terminal-tag INFO">[INFO]</span>
                 <span className="terminal-msg">
-                  No hay registros de ejecución. Los logs aparecerán cuando se integre el motor HPC.
+                  {runningSim.status === 'completed'
+                    ? 'Simulación completada con éxito. Trazas archivadas en results/simulations/.'
+                    : 'No hay registros de ejecución en curso. Presione "Ejecutar Simulación HPC" para iniciar el motor C++.'}
                 </span>
               </div>
             ) : runningSim.logs.map((log, idx) => (
