@@ -17,7 +17,8 @@ import sys
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, select
+from dotenv import load_dotenv
+from sqlalchemy import URL, create_engine, select
 from sqlalchemy.orm import Session
 
 # Asegurar path para imports
@@ -26,10 +27,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.db.repository import SimulationRepository
 from app.models import EventoEjecucion, Parametro, Rendimiento, Resultado, Simulacion
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg://agrochaco_user:agrochaco_dev_2026@localhost:5432/agrochaco",
-)
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / ".env")
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    DATABASE_URL = URL.create(
+        drivername="postgresql+psycopg",
+        username=os.getenv("POSTGRES_USER", "agrochaco_user"),
+        password=os.getenv("POSTGRES_PASSWORD"),
+        host=os.getenv("POSTGRES_HOST", "localhost"),
+        port=int(os.getenv("POSTGRES_PORT", "5432")),
+        database=os.getenv("POSTGRES_DB", "agrochaco"),
+    )
 
 
 @pytest.fixture(scope="module")

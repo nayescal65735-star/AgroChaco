@@ -429,12 +429,15 @@ class MotorService:
         }
 
         # --- B. CÁLCULO DE MÉTRICAS HPC ---
-        tiempo_segundos = Decimal(str(round(float(output_data.get("executionTimeSeconds", 0.0)), 4)))
-        speedup_raw = float(output_data.get("speedup", 1.0) or 1.0)
-        speedup = Decimal(str(round(max(0.0001, speedup_raw), 4)))
+        tiempo_segundos = Decimal(
+            str(round(float(output_data.get("executionTimeSeconds", 0.0)), 4))
+        )
 
-        eff_raw = float(output_data.get("efficiency", 1.0) or 1.0)
-        eff_norm = (eff_raw / 100.0) if eff_raw > 1.0 else max(0.0001, eff_raw)
+        speedup_raw = float(output_data.get("speedup", 0.0))
+        speedup = Decimal(str(round(max(0.0, speedup_raw), 4)))
+
+        eff_raw = float(output_data.get("efficiency", 0.0))
+        eff_norm = (eff_raw / 100.0) if eff_raw > 1.0 else max(0.0, eff_raw)
         eficiencia = Decimal(str(round(eff_norm, 4)))
 
         hilos = 1
