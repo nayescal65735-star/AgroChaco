@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useSimulations } from '../context';
 import { Card } from '../components/common/Card';
-import { SCIENTIFIC_CONSTANTS } from '../services/mockData';
 import { systemService } from '../services/api';
 import {
   Server,
@@ -9,7 +8,6 @@ import {
   Wifi,
   WifiOff,
   RefreshCw,
-  CheckCircle2,
   Sliders,
   Save,
 } from 'lucide-react';
@@ -30,6 +28,15 @@ export function Settings() {
     backendOk: false,
     databaseOk: false,
   });
+
+  const validatedEnvironment = [
+    { componente: 'Procesador', valor: 'Intel Core i7-13700' },
+    { componente: 'CPU lógicas', valor: '24' },
+    { componente: 'Memoria instalada', valor: '32 GiB de RAM' },
+    { componente: 'Sistema operativo', valor: 'Ubuntu 24.04' },
+    { componente: 'MPI', valor: 'Ejecutado en una única máquina física' },
+    { componente: 'OpenMP', valor: 'Memoria compartida' },
+  ];
 
   const [backendUrl, setBackendUrl] = useState(import.meta.env.VITE_API_URL || 'http://localhost:8000');
   const [psychrometricConstant, setPsychrometricConstant] = useState('0.066');
@@ -78,12 +85,12 @@ export function Settings() {
         <div>
           <h1 className="page-title">Configuración del Sistema &amp; HPC</h1>
           <p className="page-description">
-            Diagnóstico de conectividad FastAPI / PostgreSQL 16, topología del clúster Chaco y parámetros del modelo biofísico.
+            Diagnóstico de conectividad FastAPI / PostgreSQL 16, entorno de ejecución validado y parámetros del modelo biofísico.
           </p>
         </div>
       </div>
 
-      {/* Two Column: Backend & Database Diagnostics vs Cluster Nodes */}
+      {/* Two Column: Backend & Database Diagnostics vs Validated Environment */}
       <div
         style={{
           display: 'grid',
@@ -229,46 +236,30 @@ export function Settings() {
           )}
         </Card>
 
-        {/* Cluster Topology Card */}
         <Card
           title={
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <Server size={20} color="var(--gold-dark)" />
-              <span>Nodos del Clúster HPC Gran Chaco</span>
+              <span>Entorno de ejecución validado</span>
             </div>
           }
-          subtitle="Infraestructura de cómputo paralela y distribuida asignada a AgroChaco"
+          subtitle="Equipo donde se realizaron los experimentos; valores estáticos, no telemetría dinámica"
         >
           <div className="table-container">
             <table className="agro-table">
               <thead>
                 <tr>
-                  <th>Nodo</th>
-                  <th>IP Interna</th>
-                  <th>Rol</th>
-                  <th>Núcleos</th>
-                  <th>RAM</th>
-                  <th>Estado</th>
+                  <th>Componente</th>
+                  <th>Configuración verificada</th>
                 </tr>
               </thead>
               <tbody>
-                {SCIENTIFIC_CONSTANTS.clusterNodes.map((node, i) => (
-                  <tr key={i}>
+                {validatedEnvironment.map((item) => (
+                  <tr key={item.componente}>
                     <td>
-                      <strong>{node.name}</strong>
+                      <strong>{item.componente}</strong>
                     </td>
-                    <td>
-                      <code style={{ fontSize: '0.78rem' }}>{node.ip}</code>
-                    </td>
-                    <td style={{ fontSize: '0.8rem' }}>{node.role}</td>
-                    <td>{node.cores}c</td>
-                    <td>{node.ramGb} GB</td>
-                    <td>
-                      <span className="badge badge-completed">
-                        <CheckCircle2 size={12} />
-                        {node.status}
-                      </span>
-                    </td>
+                    <td style={{ fontSize: '0.85rem' }}>{item.valor}</td>
                   </tr>
                 ))}
               </tbody>
@@ -285,7 +276,7 @@ export function Settings() {
               fontSize: '0.82rem',
             }}
           >
-            <strong>Total Clúster:</strong> 144 núcleos lógicos • 576 GB RAM total • Red 10 GbE MPI Interconnect
+            <strong>Alcance:</strong> describe el entorno de los experimentos disponibles; no se actualiza desde ningún endpoint.
           </div>
         </Card>
       </div>
