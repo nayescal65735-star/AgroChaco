@@ -5,7 +5,7 @@ interface DemoBannerProps {
 }
 
 export function DemoBanner({
-  message = 'Entorno Académico AgroChaco: Los datos mostrados corresponden a simulaciones sintéticas calibradas para el Gran Chaco boliviano con propósitos de investigación computacional.',
+  message = 'Zonas, suelos, variedades y usuarios son catálogos DEMO de referencia. Las ejecuciones y métricas se obtienen de FastAPI/PostgreSQL cuando el backend está disponible.',
 }: DemoBannerProps) {
   return (
     <div className="demo-banner">

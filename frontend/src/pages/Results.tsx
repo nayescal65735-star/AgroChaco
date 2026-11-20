@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSimulations } from '../context';
+import { SOIL_INFOS } from '../services/mockData';
 import { Card } from '../components/common/Card';
 import { StatCard } from '../components/common/StatCard';
-import type { SpatialCell } from '../types';
+import type { SpatialCell, TimelineDataPoint } from '../types';
 import {
   Droplets,
   Wheat,
@@ -32,6 +33,15 @@ export function Results() {
   const [selectedCell, setSelectedCell] = useState<SpatialCell | null>(null);
 
   const currentSim = activeSimulation || simulations[0];
+
+  const soilInfo = currentSim
+    ? SOIL_INFOS.find((soil) => soil.id === currentSim.config.soilType)
+    : undefined;
+
+  const peakStressPoint = currentSim?.timelineData.reduce<TimelineDataPoint | null>(
+    (peak, point) => (!peak || point.cwsi > peak.cwsi ? point : peak),
+    null
+  );
 
   if (!currentSim) {
     return (
@@ -115,7 +125,15 @@ export function Results() {
         <StatCard
           label="Rendimiento Estimado"
           value={currentSim.estimatedYieldTnHa != null ? `${currentSim.estimatedYieldTnHa.toFixed(2)} tn/ha` : 'Pendiente'}
-          subtext={currentSim.yieldLossPercent != null ? `Pérdida del ${currentSim.yieldLossPercent.toFixed(1)}% vs potencial (${currentSim.nominalYieldTnHa ?? 5.4} tn/ha)` : 'Requiere ejecutar el motor C++'}
+          subtext={
+            currentSim.yieldLossPercent != null
+              ? `Pérdida del ${currentSim.yieldLossPercent.toFixed(1)}% vs potencial${
+                  currentSim.nominalYieldTnHa != null
+                    ? ` (${currentSim.nominalYieldTnHa} tn/ha)`
+                    : ''
+                }`
+              : 'Requiere ejecutar el motor C++'
+          }
           icon={<Wheat size={24} />}
           variant="danger"
         />
@@ -136,7 +154,15 @@ export function Results() {
         <StatCard
           label="Tiempo de Cómputo HPC"
           value={currentSim.executionTimeSeconds != null ? `${currentSim.executionTimeSeconds.toFixed(3)}s` : 'Pendiente'}
-          subtext={currentSim.speedup != null ? `Speedup: ${currentSim.speedup.toFixed(2)}x (${(currentSim.efficiency != null ? (currentSim.efficiency <= 1 ? currentSim.efficiency * 100 : currentSim.efficiency).toFixed(1) : '100')}% eficiencia)` : 'Pendiente de ejecución'}
+          subtext={
+            currentSim.speedup != null
+              ? `Speedup: ${currentSim.speedup.toFixed(2)}x${
+                  currentSim.efficiency != null
+                    ? ` (${(currentSim.efficiency <= 1 ? currentSim.efficiency * 100 : currentSim.efficiency).toFixed(1)}% eficiencia)`
+                    : ' · eficiencia no registrada'
+                }`
+              : 'Pendiente de ejecución'
+          }
           icon={<Layers size={24} />}
           variant="default"
         />
@@ -151,7 +177,7 @@ export function Results() {
             <span>Balance Hídrico Temporal FAO-56 (ETa vs ETc y Precipitación)</span>
           </div>
         }
-        subtitle="Evolución de evapotranspiración potencial vs real, humedad del suelo y lluvias durante los 120 días de cultivo"
+        subtitle={`Evolución de evapotranspiración potencial vs real, humedad del suelo y lluvias durante los ${currentSim.config.simulationDays} días de cultivo`}
       >
         {currentSim.timelineData.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '3rem 1rem', background: 'var(--bg-main)', borderRadius: 'var(--radius-md)', margin: '1rem 0' }}>
@@ -250,13 +276,19 @@ export function Results() {
                 />
 
                 {/* Reference line for Wilting Point */}
-                <ReferenceLine
-                  yAxisId="right"
-                  y={8.2}
-                  label={{ value: 'Punto de Marchitez (8.2%)', fill: '#dc2626', fontSize: 11 }}
-                  stroke="#dc2626"
-                  strokeDasharray="3 3"
-                />
+                {soilInfo && (
+                  <ReferenceLine
+                    yAxisId="right"
+                    y={soilInfo.wiltingPoint}
+                    label={{
+                      value: `Punto de Marchitez (${soilInfo.wiltingPoint}%)`,
+                      fill: '#dc2626',
+                      fontSize: 11,
+                    }}
+                    stroke="#dc2626"
+                    strokeDasharray="3 3"
+                  />
+                )}
               </ComposedChart>
             </ResponsiveContainer>
           </div>
@@ -298,6 +330,10 @@ export function Results() {
             <div style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--navy)' }}>Maduración (R6)</div>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Kc: 0.60 • Senescencia</div>
           </div>
+        </div>
+
+        <div style={{ marginTop: '0.85rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+          Etapas y Kc de referencia del modelo; la serie mostrada arriba corresponde a la corrida seleccionada.
         </div>
       </Card>
 
@@ -406,36 +442,44 @@ export function Results() {
               <span>Diagnóstico Agronómico del Chaco</span>
             </div>
           }
-          subtitle="Conclusiones numéricas para la toma de decisiones agrícolas"
+          subtitle="Indicadores calculados a partir de la corrida seleccionada; sin conclusiones prefijadas"
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div style={{ padding: '0.85rem', background: 'var(--bg-main)', borderRadius: 'var(--radius-md)' }}>
               <div style={{ fontWeight: 700, color: 'var(--navy)', fontSize: '0.9rem' }}>
-                Impacto en la Floración (Período Crítico R1)
+                Período de mayor estrés
               </div>
               <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '0.3rem' }}>
-                El déficit hídrico coincidió con la fase de emisión de estigmas y fecundación del grano (Días 48-62).
-                Esto provocó un aborto floral estimado de 28.5%, siendo el factor determinante de la caída en el rendimiento.
+                {peakStressPoint
+                  ? `Día ${peakStressPoint.day} (${peakStressPoint.phenologicalStage}): CWSI ${peakStressPoint.cwsi.toFixed(3)}, humedad del suelo ${peakStressPoint.soilMoisture.toFixed(1)}%.`
+                  : 'No hay serie temporal registrada para identificar el pico de estrés.'}
               </p>
             </div>
 
             <div style={{ padding: '0.85rem', background: 'var(--bg-main)', borderRadius: 'var(--radius-md)' }}>
               <div style={{ fontWeight: 700, color: 'var(--navy)', fontSize: '0.9rem' }}>
-                Respuesta Varietal ({currentSim.config.cornVariety})
+                Configuración evaluada ({currentSim.config.cornVariety})
               </div>
               <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '0.3rem' }}>
-                La variedad evaluada mantuvo una evapotranspiración relativa superior al 65% del potencial durante el
-                estrés vegetativo temprano gracias a su rusticidad radicular en suelos {currentSim.config.soilType}.
+                Suelo: {currentSim.config.soilType} · Escenario: {currentSim.config.droughtScenario} · Duración:{' '}
+                {currentSim.config.simulationDays} días. Rendimiento estimado:{' '}
+                {currentSim.estimatedYieldTnHa != null
+                  ? `${currentSim.estimatedYieldTnHa.toFixed(2)} tn/ha`
+                  : 'sin datos'}; pérdida:{' '}
+                {currentSim.yieldLossPercent != null
+                  ? `${currentSim.yieldLossPercent.toFixed(1)}%`
+                  : 'sin datos'}.
               </p>
             </div>
 
             <div style={{ padding: '0.85rem', background: 'var(--bg-main)', borderRadius: 'var(--radius-md)' }}>
               <div style={{ fontWeight: 700, color: 'var(--navy)', fontSize: '0.9rem' }}>
-                Recomendación de Manejo y Riego Estratégico
+                Déficit registrado
               </div>
               <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '0.3rem' }}>
-                Para mitigar la pérdida proyectada de {currentSim.yieldLossPercent != null ? `${currentSim.yieldLossPercent.toFixed(1)}%` : 'rendimiento'}, se aconseja la aplicación de un riego suplementario
-                de 45 mm entre los días 45 y 55 del ciclo en la zona de {currentSim.config.zoneName}.
+                {currentSim.waterDeficitMm != null
+                  ? `Déficit acumulado: ${currentSim.waterDeficitMm.toFixed(1)} mm. Cualquier recomendación de riego requiere validación agronómica adicional.`
+                  : 'No hay déficit acumulado registrado; no se emiten recomendaciones de riego.'}
               </p>
             </div>
           </div>

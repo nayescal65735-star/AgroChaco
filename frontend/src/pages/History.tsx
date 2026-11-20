@@ -73,7 +73,7 @@ export function History() {
         <div>
           <h1 className="page-title">Historial de Corridas Científicas</h1>
           <p className="page-description">
-            Registro auditable de simulaciones numéricas, parámetros de configuración y registros de ejecución HPC.
+            Registros de simulaciones, parámetros de configuración y logs devueltos por FastAPI desde PostgreSQL.
           </p>
         </div>
 
@@ -103,7 +103,7 @@ export function History() {
                 id="hist-search"
                 type="text"
                 className="form-input"
-                placeholder="Ej. SIM-GC, Villa Montes, Criollo..."
+                placeholder="Ej. SIM-, Villa Montes, Criollo..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 style={{ paddingLeft: '2.4rem' }}
@@ -274,7 +274,7 @@ export function History() {
                           type="button"
                           className="btn btn-outline btn-sm"
                           disabled
-                          title="Disponible cuando se integre el motor HPC"
+                          title="La reejecución no está disponible en la API actual"
                         >
                           <RotateCcw size={14} />
                         </button>
@@ -384,7 +384,7 @@ export function History() {
                 <div className="terminal-line">
                   <span className="terminal-tag WARN">[INFO]</span>
                   <span className="terminal-msg">
-                    Todavía no hay logs. La ejecución estará disponible cuando se integre el motor HPC.
+                    El motor no devolvió logs para esta corrida.
                   </span>
                 </div>
               ) : inspectSim.logs.map((l, i) => (

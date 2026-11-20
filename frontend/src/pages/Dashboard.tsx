@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useSimulations } from '../context';
+import type { SimulationEngine, SimulationResult } from '../types';
 import { GRAN_CHACO_ZONES } from '../services/mockData';
 import { StatCard } from '../components/common/StatCard';
 import { Card } from '../components/common/Card';
@@ -26,6 +27,20 @@ import {
   Cell,
 } from 'recharts';
 
+const ENGINE_LABELS: Record<SimulationEngine, string> = {
+  secuencial: 'Secuencial',
+  openmp: 'OpenMP',
+  mpi: 'MPI',
+  hibrido: 'Híbrido',
+};
+
+const ENGINE_COLORS: Record<SimulationEngine, string> = {
+  secuencial: 'var(--engine-sec)',
+  openmp: 'var(--engine-omp)',
+  mpi: 'var(--engine-mpi)',
+  hibrido: 'var(--gold)',
+};
+
 export function Dashboard() {
   const { simulations, setActiveSimulationId } = useSimulations();
   const navigate = useNavigate();
@@ -35,17 +50,43 @@ export function Dashboard() {
   const completedSimulations = simulations.filter((s) => s.status === 'completed').length;
 
   const totalHectares = GRAN_CHACO_ZONES.reduce((acc, z) => acc + z.activeHectares, 0);
-  const avgCWSI = Number(
-    (simulations.reduce((acc, s) => acc + (s.averageCWSI ?? 0), 0) / (simulations.filter(s => s.averageCWSI !== undefined).length || 1)).toFixed(2)
+
+  const cwsiRecords = simulations.filter((s) => s.averageCWSI !== undefined);
+  const avgCWSI = cwsiRecords.length
+    ? Number(
+        (
+          cwsiRecords.reduce((acc, s) => acc + (s.averageCWSI ?? 0), 0) /
+          cwsiRecords.length
+        ).toFixed(2)
+      )
+    : null;
+
+  const completedWithPerformance = simulations.filter(
+    (s) => s.status === 'completed' && s.executionTimeSeconds != null
   );
 
-  // Speedup chart data from benchmark
-  const speedupChartData = [
-    { name: 'Secuencial (1c)', speedup: 1.0, color: 'var(--engine-sec)' },
-    { name: 'OpenMP (8h)', speedup: 6.66, color: 'var(--engine-omp)' },
-    { name: 'MPI (16p)', speedup: 12.78, color: 'var(--engine-mpi)' },
-    { name: 'Híbrido (32c)', speedup: 25.95, color: 'var(--gold)' },
-  ];
+  const speedupRecords = completedWithPerformance.filter(
+    (sim): sim is SimulationResult & { speedup: number } => sim.speedup != null
+  );
+
+  const maxSpeedupSimulation = speedupRecords.reduce<SimulationResult | null>(
+    (best, sim) => (!best || sim.speedup > (best.speedup ?? -Infinity) ? sim : best),
+    null
+  );
+
+  const fastestSimulation = completedWithPerformance.reduce<SimulationResult | null>(
+    (best, sim) =>
+      !best || (sim.executionTimeSeconds ?? Infinity) < (best.executionTimeSeconds ?? Infinity)
+        ? sim
+        : best,
+    null
+  );
+
+  const speedupChartData = speedupRecords.map((sim) => ({
+    name: ENGINE_LABELS[sim.config.engine],
+    speedup: sim.speedup,
+    color: ENGINE_COLORS[sim.config.engine],
+  }));
 
   const handleViewSimulation = (id: string) => {
     setActiveSimulationId(id);
@@ -72,8 +113,8 @@ export function Dashboard() {
         <div>
           <h1 className="page-title">Panel de Control &amp; Modelado AgroChaco</h1>
           <p className="page-description">
-            Monitoreo en tiempo real de estrés hídrico en maíz y orquestación de cómputo de alto rendimiento (HPC)
-            en el Gran Chaco boliviano.
+            Consulta de ejecuciones, resultados de estrés hídrico y métricas HPC registradas por FastAPI y PostgreSQL
+            para el Gran Chaco boliviano.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -104,29 +145,38 @@ export function Dashboard() {
           subtext={`${completedSimulations} completadas • ${runningSimulations} en curso`}
           icon={<Activity size={24} />}
           variant="agri"
-          badge="HPC Jobs"
+          badge="BD"
         />
         <StatCard
-          label="Superficie Modelada"
+          label="Superficie de Referencia"
           value={`${totalHectares.toLocaleString()} ha`}
-          subtext="6 Municipios Chaqueños"
+          subtext="6 municipios del catálogo DEMO"
           icon={<MapPin size={24} />}
           variant="default"
+          badge="DEMO"
         />
         <StatCard
           label="Índice CWSI Promedio"
-          value={avgCWSI.toFixed(2)}
-          subtext="Estrés Hídrico Moderado a Severo"
+          value={avgCWSI !== null ? avgCWSI.toFixed(2) : 'Sin datos'}
+          subtext="Promedio de corridas con métricas disponibles"
           icon={<Droplets size={24} />}
           variant="danger"
         />
         <StatCard
-          label="Speedup Máximo"
-          value="25.95×"
-          subtext="Híbrido MPI+OpenMP (32 cores)"
+          label="Speedup Máximo Registrado"
+          value={
+            maxSpeedupSimulation?.speedup != null
+              ? `${maxSpeedupSimulation.speedup.toFixed(2)}×`
+              : 'Sin datos'
+          }
+          subtext={
+            maxSpeedupSimulation
+              ? `${ENGINE_LABELS[maxSpeedupSimulation.config.engine]} · ${maxSpeedupSimulation.id}`
+              : 'Sin ejecuciones completadas con speedup'
+          }
           icon={<Zap size={24} />}
           variant="gold"
-          badge="Aceleración"
+          badge="FastAPI"
         />
       </div>
 
@@ -147,10 +197,10 @@ export function Dashboard() {
               <span>Vulnerabilidad Hídrica en el Gran Chaco</span>
             </div>
           }
-          subtitle="Monitoreo agroclimático por municipios en Tarija, Santa Cruz y Chuquisaca"
+          subtitle="Valores de referencia del catálogo local; no son telemetría agroclimática en vivo"
           action={
             <span className="system-tag" style={{ background: '#fef3c7', color: '#b45309' }}>
-              Campaña Maicera 2026
+              Datos DEMO
             </span>
           }
         >
@@ -214,48 +264,62 @@ export function Dashboard() {
           title={
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <Zap size={20} color="var(--gold)" />
-              <span>Aceleración de Cómputo (Speedup $S_p$)</span>
+              <span>Speedup observado por motor</span>
             </div>
           }
-          subtitle="Comparativa de escalabilidad: Secuencial vs OpenMP vs MPI vs Híbrido"
+          subtitle="Ejecuciones completadas devueltas por FastAPI/PostgreSQL; sin curvas ni extrapolaciones"
           action={
             <button
               type="button"
               className="btn btn-outline btn-sm"
               onClick={() => navigate('/comparacion-rendimiento')}
             >
-              Ver Benchmark Completo
+              Ver evidencia
             </button>
           }
         >
-          <div style={{ height: '240px', width: '100%', marginTop: '0.5rem' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={speedupChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#4a5c53' }} />
-                <YAxis unit="x" tick={{ fontSize: 12, fill: '#4a5c53' }} />
-                <Tooltip
-                  formatter={(value) => [`${value}x`, 'Aceleración']}
-                  contentStyle={{
-                    borderRadius: '8px',
-                    borderColor: '#cbd5e1',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                  }}
-                />
-                <Bar dataKey="speedup" radius={[6, 6, 0, 0]}>
-                  {speedupChartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {speedupChartData.length > 0 ? (
+            <div style={{ height: '240px', width: '100%', marginTop: '0.5rem' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={speedupChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#4a5c53' }} />
+                  <YAxis unit="x" tick={{ fontSize: 12, fill: '#4a5c53' }} />
+                  <Tooltip
+                    formatter={(value) => [`${value}x`, 'Speedup registrado']}
+                    contentStyle={{
+                      borderRadius: '8px',
+                      borderColor: '#cbd5e1',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                    }}
+                  />
+                  <Bar dataKey="speedup" radius={[6, 6, 0, 0]}>
+                    {speedupChartData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div
+              style={{
+                textAlign: 'center',
+                padding: '4rem 1rem',
+                color: 'var(--text-muted)',
+                fontSize: '0.88rem',
+              }}
+            >
+              No hay ejecuciones completadas con speedup registrado en la base de datos.
+            </div>
+          )}
 
           <div
             style={{
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
+              gap: '1rem',
               padding: '0.85rem 1rem',
               background: 'var(--soft-green)',
               borderRadius: 'var(--radius-md)',
@@ -264,10 +328,13 @@ export function Dashboard() {
               color: 'var(--agri-green-dark)',
             }}
           >
-            <div>
-              <strong>Motor Híbrido:</strong> 342.5s mono-hilo reducido a <strong>13.2s</strong> en clúster.
-            </div>
-            <span style={{ fontWeight: 700 }}>Eficiencia: 81.1%</span>
+            <span>
+              <strong>Tiempo mínimo registrado:</strong>{' '}
+              {fastestSimulation?.executionTimeSeconds != null
+                ? `${fastestSimulation.executionTimeSeconds}s (${ENGINE_LABELS[fastestSimulation.config.engine]})`
+                : 'sin datos'}
+            </span>
+            <span style={{ fontWeight: 700 }}>Fuente: PostgreSQL / FastAPI</span>
           </div>
         </Card>
       </div>
@@ -280,7 +347,7 @@ export function Dashboard() {
             <span>Simulaciones Recientes de Estrés Hídrico</span>
           </div>
         }
-        subtitle="Registro de ejecuciones científicas del modelo de balance de agua"
+        subtitle="Registros devueltos por FastAPI desde PostgreSQL; sin simulaciones DEMO en esta tabla"
         action={
           <button
             type="button"

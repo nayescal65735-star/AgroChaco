@@ -19,7 +19,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
-  const { systemHealth, isExecutionActive } = useSimulations();
+  const { isExecutionActive } = useSimulations();
 
   const navItems = [
     {
@@ -126,11 +126,11 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           <div className="sidebar-hpc-pill">
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <Server size={14} color="#34d399" />
-              <span>Chaco HPC Cluster</span>
+              <span>Entorno HPC Local</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
-                {systemHealth.clusterNodes} Nodos
+                Nodos: no reportados
               </span>
               <div className="status-dot" />
             </div>
@@ -143,7 +143,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               textAlign: 'center',
             }}
           >
-            OpenMP 4.5 • MPICH 4.1.2 • FAO-56
+            OpenMP • MPI • FAO-56
           </div>
         </div>
       </aside>

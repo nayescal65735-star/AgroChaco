@@ -207,7 +207,7 @@ export function Login() {
                       {demoUser.role === 'investigador'
                         ? 'Investigadora Principal'
                         : demoUser.role === 'operador_hpc'
-                        ? 'Operador HPC Clúster'
+                        ? 'Operador HPC (DEMO)'
                         : 'Especialista Agrónomo'} • {demoUser.institution.split('-')[0]}
                     </div>
                   </div>

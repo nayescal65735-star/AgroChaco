@@ -9,7 +9,6 @@ import {
   WifiOff,
   RefreshCw,
   Sliders,
-  Save,
 } from 'lucide-react';
 
 export function Settings() {
@@ -21,7 +20,6 @@ export function Settings() {
     backendOk: boolean;
     databaseOk: boolean;
     dbInfo?: string;
-    backendVersion?: string;
     latencyMs?: number;
   }>({
     tested: false,
@@ -38,11 +36,10 @@ export function Settings() {
     { componente: 'OpenMP', valor: 'Memoria compartida' },
   ];
 
-  const [backendUrl, setBackendUrl] = useState(import.meta.env.VITE_API_URL || 'http://localhost:8000');
-  const [psychrometricConstant, setPsychrometricConstant] = useState('0.066');
-  const [soilDepthMeters, setSoilDepthMeters] = useState('1.2');
-  const [albedoMaize, setAlbedoMaize] = useState('0.23');
-  const [savedFeedback, setSavedFeedback] = useState(false);
+  const configuredBackendUrl = import.meta.env.VITE_API_URL || 'http://localhost:8001';
+  const psychrometricConstant = '0.066';
+  const soilDepthMeters = '1.2';
+  const albedoMaize = '0.23';
 
   const runConnectionDiagnostic = async () => {
     setIsTesting(true);
@@ -56,8 +53,7 @@ export function Settings() {
         tested: true,
         backendOk: backendRes.online,
         databaseOk: dbRes.connected,
-        dbInfo: dbRes.dbName ? `${dbRes.dbName} (${dbRes.version || 'PostgreSQL 16'})` : undefined,
-        backendVersion: backendRes.version,
+        dbInfo: dbRes.dbName ? `${dbRes.dbName} (${dbRes.version || 'PostgreSQL'})` : undefined,
         latencyMs: Math.round(end - start),
       });
 
@@ -73,19 +69,13 @@ export function Settings() {
     }
   };
 
-  const handleSaveParameters = (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavedFeedback(true);
-    setTimeout(() => setSavedFeedback(false), 2500);
-  };
-
   return (
     <div>
       <div className="page-header">
         <div>
           <h1 className="page-title">Configuración del Sistema &amp; HPC</h1>
           <p className="page-description">
-            Diagnóstico de conectividad FastAPI / PostgreSQL 16, entorno de ejecución validado y parámetros del modelo biofísico.
+            Diagnóstico de conectividad FastAPI / PostgreSQL, entorno de ejecución validado y constantes de referencia del modelo biofísico.
           </p>
         </div>
       </div>
@@ -104,7 +94,7 @@ export function Settings() {
           title={
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <Database size={20} color="var(--agri-green)" />
-              <span>Conexión Backend FastAPI &amp; PostgreSQL 16</span>
+              <span>Conexión Backend FastAPI &amp; PostgreSQL</span>
             </div>
           }
           subtitle="Monitoreo de la API REST y de la persistencia relacional en PostgreSQL"
@@ -126,11 +116,11 @@ export function Settings() {
               id="backend-url"
               type="text"
               className="form-input"
-              value={backendUrl}
-              onChange={(e) => setBackendUrl(e.target.value)}
+              value={configuredBackendUrl}
+              readOnly
             />
             <span className="form-hint">
-              Por defecto: <code>http://localhost:8000</code> conectado al contenedor FastAPI.
+              Configurado mediante <code>VITE_API_URL</code> al compilar; este campo no modifica la conexión en caliente.
             </span>
           </div>
 
@@ -179,7 +169,7 @@ export function Settings() {
                   color: systemHealth.backend === 'online' ? '#15803d' : '#475569',
                 }}
               >
-                {systemHealth.backend === 'online' ? 'ONLINE (v1.0.0)' : 'STANDALONE / DEMO'}
+                {systemHealth.backend === 'online' ? 'ONLINE' : 'SIN CONEXIÓN'}
               </span>
             </div>
 
@@ -199,7 +189,7 @@ export function Settings() {
                 <Database size={18} color={systemHealth.database === 'connected' ? '#16a34a' : '#94a3b8'} />
                 <div>
                   <div style={{ fontWeight: 700, color: 'var(--navy)', fontSize: '0.9rem' }}>
-                    Base de Datos PostgreSQL 16
+                    Base de Datos PostgreSQL
                   </div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                     Endpoint prueba: <code>/api/database/test</code>
@@ -214,7 +204,7 @@ export function Settings() {
                   color: systemHealth.database === 'connected' ? '#15803d' : '#475569',
                 }}
               >
-                {systemHealth.database === 'connected' ? 'CONECTADA' : 'MODO LOCAL'}
+                {systemHealth.database === 'connected' ? 'CONECTADA' : 'NO DISPONIBLE'}
               </span>
             </div>
           </div>
@@ -231,7 +221,7 @@ export function Settings() {
                 color: testResult.backendOk ? '#166534' : '#92400e',
               }}
             >
-              <strong>Resultado del Test:</strong> Latencia: {testResult.latencyMs} ms • Backend: {testResult.backendOk ? 'Activo' : 'No responde (usando modo autónomo)'} • Base de Datos: {testResult.databaseOk ? testResult.dbInfo || 'Conectada' : 'No disponible'}.
+              <strong>Resultado del Test:</strong> Latencia: {testResult.latencyMs} ms • Backend: {testResult.backendOk ? 'Activo' : 'No responde'} • Base de Datos: {testResult.databaseOk ? testResult.dbInfo || 'Conectada' : 'No disponible'}.
             </div>
           )}
         </Card>
@@ -281,7 +271,7 @@ export function Settings() {
         </Card>
       </div>
 
-      {/* Model Constants Form */}
+      {/* Model Constants Reference */}
       <Card
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -289,71 +279,71 @@ export function Settings() {
             <span>Constantes Biofísicas del Modelo FAO-56 Penman-Monteith</span>
           </div>
         }
-        subtitle="Parámetros físicos calibrados para la radiación y micrometeorología del Chaco boliviano"
+        subtitle="Valores de referencia: no se envían al backend ni se aplican a las simulaciones"
       >
-        <form onSubmit={handleSaveParameters}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-              gap: '1.25rem',
-              marginBottom: '1.5rem',
-            }}
-          >
-            <div className="form-group">
-              <label className="form-label" htmlFor="set-psychro">
-                Constante Psicrométrica ($\gamma$) [kPa/°C]
-              </label>
-              <input
-                id="set-psychro"
-                type="text"
-                className="form-input"
-                value={psychrometricConstant}
-                onChange={(e) => setPsychrometricConstant(e.target.value)}
-              />
-              <span className="form-hint">A nivel del mar: ~0.067; Yacuiba (600 msnm): ~0.066</span>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="set-soil-depth">
-                Profundidad Radicular Efectiva ($Z_r$) [m]
-              </label>
-              <input
-                id="set-soil-depth"
-                type="text"
-                className="form-input"
-                value={soilDepthMeters}
-                onChange={(e) => setSoilDepthMeters(e.target.value)}
-              />
-              <span className="form-hint">Maíz en etapa madura en el Chaco: 1.0 - 1.4 m</span>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="set-albedo">
-                Albedo del Cultivo de Maíz ($\alpha$)
-              </label>
-              <input
-                id="set-albedo"
-                type="text"
-                className="form-input"
-                value={albedoMaize}
-                onChange={(e) => setAlbedoMaize(e.target.value)}
-              />
-              <span className="form-hint">FAO-56 estándar para dosel verde de maíz: 0.23</span>
-            </div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+            gap: '1.25rem',
+            marginBottom: '1.5rem',
+          }}
+        >
+          <div className="form-group">
+            <label className="form-label" htmlFor="set-psychro">
+              Constante Psicrométrica ($\gamma$) [kPa/°C]
+            </label>
+            <input
+              id="set-psychro"
+              type="text"
+              className="form-input"
+              value={psychrometricConstant}
+              readOnly
+            />
+            <span className="form-hint">A nivel del mar: ~0.067; Yacuiba (600 msnm): ~0.066</span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ fontSize: '0.84rem', color: savedFeedback ? 'var(--status-success)' : 'var(--text-muted)' }}>
-              {savedFeedback ? '✓ Parámetros actualizados y guardados en memoria del simulador.' : 'Los cambios se aplican a todas las nuevas simulaciones.'}
-            </div>
-
-            <button type="submit" className="btn btn-primary">
-              <Save size={16} />
-              Guardar Parámetros Biofísicos
-            </button>
+          <div className="form-group">
+            <label className="form-label" htmlFor="set-soil-depth">
+              Profundidad Radicular Efectiva ($Z_r$) [m]
+            </label>
+            <input
+              id="set-soil-depth"
+              type="text"
+              className="form-input"
+              value={soilDepthMeters}
+              readOnly
+            />
+            <span className="form-hint">Maíz en etapa madura en el Chaco: 1.0 - 1.4 m</span>
           </div>
-        </form>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="set-albedo">
+              Albedo del Cultivo de Maíz ($\alpha$)
+            </label>
+            <input
+              id="set-albedo"
+              type="text"
+              className="form-input"
+              value={albedoMaize}
+              readOnly
+            />
+            <span className="form-hint">FAO-56 estándar para dosel verde de maíz: 0.23</span>
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: '0.85rem 1rem',
+            borderRadius: 'var(--radius-md)',
+            background: '#fffbeb',
+            border: '1px solid #fef3c7',
+            fontSize: '0.84rem',
+            color: '#92400e',
+          }}
+        >
+          No existe un endpoint para persistir estas constantes. La API actual no las aplica a nuevas simulaciones.
+        </div>
       </Card>
     </div>
   );

@@ -55,7 +55,7 @@ export function NewSimulation() {
   const selectedZone = GRAN_CHACO_ZONES.find((z) => z.id === zone)!;
   const selectedSoil = SOIL_INFOS.find((s) => s.id === soilType)!;
 
-  // Real-time HPC estimation
+  // Heuristic local estimate; not a measured benchmark
   const totalCells = gridRows * gridCols;
   const totalHectaresSimulated = ((totalCells * (cellSize * cellSize)) / 10000).toFixed(0);
 
@@ -532,7 +532,7 @@ export function NewSimulation() {
 
                   <div className="form-group" style={{ margin: 0 }}>
                     <label className="form-label" htmlFor="sim-nodes">
-                      Nodos de Clúster Involucrados
+                      Particiones lógicas (metadato)
                     </label>
                     <select
                       id="sim-nodes"
@@ -540,10 +540,13 @@ export function NewSimulation() {
                       value={nodesCount}
                       onChange={(e) => setNodesCount(Number(e.target.value))}
                     >
-                      <option value={1}>1 nodo (local)</option>
-                      <option value={2}>2 nodos (chaco-node-01..02)</option>
-                      <option value={4}>4 nodos (chaco-node-01..04)</option>
+                      <option value={1}>1 (procesos locales)</option>
+                      <option value={2}>2 (sin nodos físicos)</option>
+                      <option value={4}>4 (sin nodos físicos)</option>
                     </select>
+                    <span className="form-hint">
+                      El backend ejecuta MPI en una única máquina; este valor se conserva como metadato de configuración.
+                    </span>
                   </div>
                 </>
               )}
@@ -566,16 +569,19 @@ export function NewSimulation() {
           >
             <div>
               <div style={{ fontSize: '0.78rem', color: 'var(--gold)', textTransform: 'uppercase', fontWeight: 700 }}>
-                Proyección de Rendimiento HPC
+                Proyección heurística (DEMO, no medida)
               </div>
               <div style={{ fontSize: '1.2rem', fontWeight: 700, marginTop: '0.2rem' }}>
-                Tiempo Estimado: ~{est.estimatedTime}s{' '}
+                Tiempo orientativo: ~{est.estimatedTime}s{' '}
                 <span style={{ fontSize: '0.85rem', color: '#94a3b8', fontWeight: 400 }}>
-                  (vs {est.baseSequentialSeconds}s secuencial)
+                  (referencia local: {est.baseSequentialSeconds}s)
                 </span>
               </div>
               <div style={{ fontSize: '0.8rem', color: '#cbd5e1', marginTop: '0.2rem' }}>
-                Aceleración esperada: <strong>{est.speedup}×</strong> • Eficiencia paralela: <strong>{est.efficiency}%</strong>
+                Aceleración estimada: <strong>{est.speedup}×</strong> • Eficiencia estimada: <strong>{est.efficiency}%</strong>
+              </div>
+              <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '0.25rem' }}>
+                Regla local simple; no proviene de benchmarks ni de ejecuciones de PostgreSQL.
               </div>
             </div>
 

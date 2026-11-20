@@ -54,7 +54,7 @@ export function Header({ onToggleSidebar }: HeaderProps) {
         {/* Backend & DB Health status badge */}
         <div
           className={`backend-indicator-badge ${isOnline ? 'online' : 'offline'}`}
-          title={`FastAPI: ${systemHealth.backend} | DB PostgreSQL 16: ${systemHealth.database} | Nodos: ${systemHealth.clusterNodes}`}
+          title={`FastAPI: ${systemHealth.backend} | PostgreSQL: ${systemHealth.database} | Nodos: no reportados por la API`}
         >
           {isOnline ? <Wifi size={14} /> : <WifiOff size={14} />}
           <span>{isOnline ? 'FastAPI Conectado' : 'Modo Standalone / Demo'}</span>

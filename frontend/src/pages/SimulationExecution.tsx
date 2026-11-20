@@ -112,7 +112,7 @@ export function SimulationExecution() {
       <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
         <h2>No hay simulaciones en cola ni activas</h2>
         <p style={{ color: 'var(--text-secondary)', margin: '1rem 0' }}>
-          Configure una nueva simulación para ver la ejecución en tiempo real en los nodos del clúster.
+          Configure una nueva simulación para ejecutarla con el motor C++ del backend.
         </p>
         <button
           type="button"
@@ -133,16 +133,16 @@ export function SimulationExecution() {
   else if (currentDay > 68 && currentDay <= 95) currentStage = 'Llenado de Grano (R2 - R4)';
   else if (currentDay > 95) currentStage = 'Madurez Fisiológica (R6)';
 
-  // Real-time timeline slice up to current day
+  // Timeline slice up to current day
   const visibleTimeline = runningSim.timelineData.slice(0, Math.max(5, currentDay));
 
   return (
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Ejecución &amp; Monitoreo en Vivo (HPC)</h1>
+          <h1 className="page-title">Ejecución &amp; Resultados (HPC)</h1>
           <p className="page-description">
-            Supervisión continua de procesos MPI, distribución de hilos OpenMP y convergencia de balance hídrico.
+            Ejecución del motor C++ y consulta de los resultados y logs devueltos por FastAPI.
           </p>
         </div>
 
@@ -316,7 +316,7 @@ export function SimulationExecution() {
           </div>
         </div>
 
-        {/* Real-time Submetrics Grid */}
+        {/* Simulation Submetrics Grid */}
         <div
           style={{
             display: 'grid',
@@ -478,7 +478,7 @@ export function SimulationExecution() {
               <span>Terminal &amp; Logs de Paralelización</span>
             </div>
           }
-          subtitle="Salida de consola estándar (stdout/stderr) de Slurm, MPI y OpenMP"
+          subtitle="Logs del motor C++ devueltos por FastAPI (sin Slurm)"
         >
           <div className="terminal-window">
             {runningSim.logs.length === 0 ? (
