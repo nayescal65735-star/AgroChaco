@@ -171,9 +171,8 @@ SimulationResult OpenMPEngine::run() {
     result.currentDay = config_.simulationDays;
     result.completedAt = getCurrentIsoTimestamp();
     result.executionTimeSeconds = timer.getElapsedSeconds();
-    // Se calcularán al comparar contra la ejecución secuencial T1.
-    result.speedup = 0.0;
-    result.efficiency = 0.0;
+    result.speedup = std::nullopt;
+    result.efficiency = std::nullopt;
     result.averageCWSI = std::round(avgCwsi * 1000.0) / 1000.0;
     result.soilMoistureFinalPercent = std::round(lastSummary.averageMoisture * 10.0) / 10.0;
     result.yieldLossPercent = std::round(yieldLoss * 10.0) / 10.0;

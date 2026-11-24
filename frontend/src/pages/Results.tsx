@@ -4,6 +4,10 @@ import { useSimulations } from '../context';
 import { SOIL_INFOS } from '../services/mockData';
 import { Card } from '../components/common/Card';
 import { StatCard } from '../components/common/StatCard';
+import {
+  formatEfficiency,
+  formatSpeedup,
+} from '../utils/performanceMetrics';
 import type { SpatialCell, TimelineDataPoint } from '../types';
 import {
   Droplets,
@@ -51,6 +55,16 @@ export function Results() {
       </div>
     );
   }
+
+  const performanceSubtext =
+    currentSim.speedup === undefined
+      ? 'Pendiente de ejecución'
+      : currentSim.efficiency === undefined
+        ? `Speedup: ${formatSpeedup(currentSim.speedup)} · eficiencia pendiente`
+        : `Speedup: ${formatSpeedup(currentSim.speedup)} · Eficiencia: ${formatEfficiency(
+            currentSim.efficiency,
+            currentSim.speedup
+          )}`;
 
   const exportJSON = () => {
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(currentSim, null, 2));
@@ -154,15 +168,7 @@ export function Results() {
         <StatCard
           label="Tiempo de Cómputo HPC"
           value={currentSim.executionTimeSeconds != null ? `${currentSim.executionTimeSeconds.toFixed(3)}s` : 'Pendiente'}
-          subtext={
-            currentSim.speedup != null
-              ? `Speedup: ${currentSim.speedup.toFixed(2)}x${
-                  currentSim.efficiency != null
-                    ? ` (${(currentSim.efficiency <= 1 ? currentSim.efficiency * 100 : currentSim.efficiency).toFixed(1)}% eficiencia)`
-                    : ' · eficiencia no registrada'
-                }`
-              : 'Pendiente de ejecución'
-          }
+          subtext={performanceSubtext}
           icon={<Layers size={24} />}
           variant="default"
         />

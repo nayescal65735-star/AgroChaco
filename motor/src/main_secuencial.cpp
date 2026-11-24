@@ -6,8 +6,18 @@
 #include <string>
 #include <vector>
 #include <iomanip>
+#include <sstream>
 
 using namespace agrochaco;
+
+static std::string formatOptionalMetric(const std::optional<double>& value, const std::string& suffix) {
+    if (!value.has_value()) {
+        return "No disponible: falta una medición secuencial comparable";
+    }
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(2) << value.value() << suffix;
+    return ss.str();
+}
 
 void printUsage(const char* progName) {
     std::cout << "===============================================================\n"
@@ -127,8 +137,8 @@ int main(int argc, char* argv[]) {
         std::cout << "  Tiempo de ejecución (T1):      " << std::setprecision(4) << result.executionTimeSeconds << " s\n";
     }
     std::cout << std::setprecision(2)
-              << "  Speedup de referencia (S1):    " << result.speedup << "x\n"
-              << "  Eficiencia paralela:           " << result.efficiency << "%\n"
+              << "  Speedup de referencia (S1):    " << formatOptionalMetric(result.speedup, "x") << "\n"
+              << "  Eficiencia paralela:           " << formatOptionalMetric(result.efficiency, "%") << "\n"
               << "  Memoria residente estimada:    " << result.memoryUsageMb << " MB\n"
               << "  CWSI estacional promedio:      " << std::setprecision(3) << result.averageCWSI << "\n"
               << "  Humedad final del suelo:       " << std::setprecision(1) << result.soilMoistureFinalPercent << " %\n"

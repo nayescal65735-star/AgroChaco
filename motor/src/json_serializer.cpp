@@ -7,6 +7,14 @@
 
 namespace agrochaco {
 
+static void writeOptionalMetric(std::ostringstream& ss, const std::optional<double>& value) {
+    if (value.has_value()) {
+        ss << value.value();
+    } else {
+        ss << "null";
+    }
+}
+
 static std::string escapeJson(const std::string& s) {
     std::ostringstream o;
     for (char c : s) {
@@ -79,8 +87,12 @@ std::string JsonSerializer::serializeResult(const SimulationResult& result, bool
     ss << indent << "\"createdAt\": \"" << escapeJson(result.createdAt) << "\"," << nl;
     ss << indent << "\"completedAt\": \"" << escapeJson(result.completedAt) << "\"," << nl;
     ss << indent << "\"executionTimeSeconds\": " << result.executionTimeSeconds << "," << nl;
-    ss << indent << "\"speedup\": " << result.speedup << "," << nl;
-    ss << indent << "\"efficiency\": " << result.efficiency << "," << nl;
+    ss << indent << "\"speedup\": ";
+    writeOptionalMetric(ss, result.speedup);
+    ss << "," << nl;
+    ss << indent << "\"efficiency\": ";
+    writeOptionalMetric(ss, result.efficiency);
+    ss << "," << nl;
     ss << indent << "\"averageCWSI\": " << result.averageCWSI << "," << nl;
     ss << indent << "\"soilMoistureFinalPercent\": " << result.soilMoistureFinalPercent << "," << nl;
     ss << indent << "\"yieldLossPercent\": " << result.yieldLossPercent << "," << nl;

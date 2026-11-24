@@ -32,18 +32,8 @@ class Rendimiento(Base):
     procesos = Column(Integer, nullable=False, default=1, server_default=text("1"))
     nodos = Column(Integer, nullable=False, default=1, server_default=text("1"))
     tiempo_segundos = Column(Numeric(12, 4), nullable=False)
-    speedup = Column(
-        Numeric(10, 4),
-        nullable=False,
-        default=1.0000,
-        server_default=text("1.0000"),
-    )
-    eficiencia = Column(
-        Numeric(8, 4),
-        nullable=False,
-        default=1.0000,
-        server_default=text("1.0000"),
-    )
+    speedup = Column(Numeric(10, 4), nullable=True)
+    eficiencia = Column(Numeric(8, 4), nullable=True)
     repeticion = Column(
         Integer,
         nullable=False,

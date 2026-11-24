@@ -20,6 +20,7 @@ Verifica:
 17. Semántica de métricas biofísicas, normalización y respeto estricto de límites CHECK.
 18. Seguridad: validación de simulation_id y mitigación de Path Traversal.
 19. Integración real de punta a punta ejecutando el binario físico agrochaco_secuencial.
+20. Speedup y eficiencia no disponibles se persisten y exponen como NULL.
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -728,6 +729,57 @@ class TestApiSimulationsPostgres(unittest.TestCase):
             perm_file = PROJECT_ROOT / "results" / "simulations" / f"{sim_id}.json"
             if perm_file.exists():
                 perm_file.unlink(missing_ok=True)
+
+    def test_20_metricas_no_disponibles_son_null_en_postgresql_y_fastapi(self):
+        """20. NULL (y cero) no se convierten en speedup/eficiencia medidos."""
+        payload = self._sample_payload(name="Simulacion Metricas Null", engine="openmp", openmpThreads=4)
+        created = create_simulation(payload, db=self.db)
+        sim_id = created["id"]
+
+        base_output = {
+            "averageCWSI": 0.2,
+            "soilMoistureFinalPercent": 15.0,
+            "waterDeficitMm": 20.0,
+            "yieldLossPercent": 10.0,
+            "executionTimeSeconds": 0.0425,
+            "timelineData": [
+                {"cwsi": 0.1, "soilMoisture": 18.0},
+                {"cwsi": 0.2, "soilMoisture": 15.0},
+            ],
+        }
+
+        try:
+            for velocidad, eficiencia in ((None, None), (0.0, 0.0)):
+                resultado_motor = {
+                    "engine": "openmp",
+                    "archivo_detalle": f"results/simulations/{sim_id}.json",
+                    "output_data": {
+                        **base_output,
+                        "speedup": velocidad,
+                        "efficiency": eficiencia,
+                    },
+                }
+                MotorService.persistir_resultados_en_db(
+                    db=self.db,
+                    simulation_id=sim_id,
+                    config_dict={"engine": "openmp", "openmpThreads": 4},
+                    resultado_ejecucion=resultado_motor,
+                )
+
+            registros = self.db.execute(
+                select(Rendimiento).where(Rendimiento.simulacion_id == sim_id)
+            ).scalars().all()
+            self.assertEqual(len(registros), 2)
+            self.assertTrue(all(r.speedup is None for r in registros))
+            self.assertTrue(all(r.eficiencia is None for r in registros))
+            self.assertTrue(all(r.tiempo_segundos == Decimal("0.0425") for r in registros))
+
+            fetched = get_simulation(sim_id, db=self.db)
+            self.assertIsNone(fetched["speedup"])
+            self.assertIsNone(fetched["efficiency"])
+            self.assertAlmostEqual(fetched["executionTimeSeconds"], 0.0425, places=4)
+        finally:
+            delete_simulation(sim_id, db=self.db)
 
 
 if __name__ == "__main__":

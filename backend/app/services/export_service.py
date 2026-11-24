@@ -193,7 +193,7 @@ class ExportService:
                 principal = sim.rendimientos[-1]
                 modalidad = principal.modalidad
                 tiempo = str(principal.tiempo_segundos)
-                speedup = str(principal.speedup)
+                speedup = "" if principal.speedup is None else str(principal.speedup)
 
             writer.writerow(
                 [
@@ -269,8 +269,8 @@ class ExportService:
                     r.procesos,
                     r.nodos,
                     str(r.tiempo_segundos),
-                    str(r.speedup),
-                    str(r.eficiencia),
+                    "" if r.speedup is None else str(r.speedup),
+                    "" if r.eficiencia is None else str(r.eficiencia),
                     r.repeticion,
                 ]
             )

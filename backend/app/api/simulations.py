@@ -187,8 +187,16 @@ def _format_simulation_response(sim: Simulacion) -> dict[str, Any]:
     if sim.rendimientos:
         ultimo_rendimiento = sim.rendimientos[-1]
         response_data["executionTimeSeconds"] = float(ultimo_rendimiento.tiempo_segundos)
-        response_data["speedup"] = float(ultimo_rendimiento.speedup)
-        response_data["efficiency"] = float(ultimo_rendimiento.eficiencia)
+        response_data["speedup"] = (
+            float(ultimo_rendimiento.speedup)
+            if ultimo_rendimiento.speedup is not None
+            else None
+        )
+        response_data["efficiency"] = (
+            float(ultimo_rendimiento.eficiencia)
+            if ultimo_rendimiento.eficiencia is not None
+            else None
+        )
 
     # Adjuntar métricas agronómicas si existen registradas en PostgreSQL
     if sim.resultado:

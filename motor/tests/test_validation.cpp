@@ -6,6 +6,7 @@
 #include "agrochaco/grid.hpp"
 #include "agrochaco/simulation_engine.hpp"
 #include "agrochaco/json_serializer.hpp"
+#include <mpi.h>
 #include <iostream>
 #include <cassert>
 #include <cmath>
@@ -15,7 +16,7 @@ using namespace agrochaco;
 
 // 1. Validación de rechazo de parámetros inválidos
 void testValidationRejectsInvalidParameters() {
-    std::cout << "[TEST 1/8] Ejecutando: testValidationRejectsInvalidParameters...\n";
+    std::cout << "[TEST 1/10] Ejecutando: testValidationRejectsInvalidParameters...\n";
 
     SimulationConfig cfg = ConfigLoader::createDefault();
     std::vector<std::string> errors;
@@ -57,7 +58,7 @@ void testValidationRejectsInvalidParameters() {
 
 // 2. Conservación estricta de masa de agua (Celda y Malla 2D)
 void testWaterMassConservation() {
-    std::cout << "[TEST 2/8] Ejecutando: testWaterMassConservation...\n";
+    std::cout << "[TEST 2/10] Ejecutando: testWaterMassConservation...\n";
 
     const auto& soil = AgronomicData::getSoil(SoilType::FRANCO_ARENOSO);
 
@@ -86,7 +87,7 @@ void testWaterMassConservation() {
 
 // 3. Día sin precipitación
 void testNoPrecipitationDay() {
-    std::cout << "[TEST 3/8] Ejecutando: testNoPrecipitationDay...\n";
+    std::cout << "[TEST 3/10] Ejecutando: testNoPrecipitationDay...\n";
 
     const auto& soil = AgronomicData::getSoil(SoilType::FRANCO_ARCILLOSO);
     double initMoist = 25.0; // Entre WP (17.5) y FC (31.0)
@@ -108,7 +109,7 @@ void testNoPrecipitationDay() {
 
 // 4. Lluvia extrema y saturación (Drenaje de exceso)
 void testExtremeRainfall() {
-    std::cout << "[TEST 4/8] Ejecutando: testExtremeRainfall...\n";
+    std::cout << "[TEST 4/10] Ejecutando: testExtremeRainfall...\n";
 
     const auto& soil = AgronomicData::getSoil(SoilType::ARENOSO); // FC=12.0%, WP=4.8%
     double initMoist = 10.0;
@@ -133,7 +134,7 @@ void testExtremeRainfall() {
 
 // 5. Demanda ETc igual a cero (Evitar división por cero y NaN)
 void testZeroEtcHandling() {
-    std::cout << "[TEST 5/8] Ejecutando: testZeroEtcHandling...\n";
+    std::cout << "[TEST 5/10] Ejecutando: testZeroEtcHandling...\n";
 
     const auto& soil = AgronomicData::getSoil(SoilType::FRANCO);
 
@@ -155,7 +156,7 @@ void testZeroEtcHandling() {
 
 // 6. Sequía prolongada y convergencia hacia el PMP
 void testProlongedDroughtAndPmpConvergence() {
-    std::cout << "[TEST 6/8] Ejecutando: testProlongedDroughtAndPmpConvergence...\n";
+    std::cout << "[TEST 6/10] Ejecutando: testProlongedDroughtAndPmpConvergence...\n";
 
     const auto& soil = AgronomicData::getSoil(SoilType::ARENOSO); // FC=12.0%, WP=4.8%
     double moisture = soil.fieldCapacity;
@@ -182,7 +183,7 @@ void testProlongedDroughtAndPmpConvergence() {
 
 // 7. Modelo de Rendimiento FAO-33 (Sensibilidad por etapas)
 void testFao33YieldLossCalculation() {
-    std::cout << "[TEST 7/8] Ejecutando: testFao33YieldLossCalculation...\n";
+    std::cout << "[TEST 7/10] Ejecutando: testFao33YieldLossCalculation...\n";
 
     const auto& variety = AgronomicData::getCornVariety(CornVarietyId::CHACO_01_CRIOLLO);
 
@@ -219,7 +220,7 @@ void testFao33YieldLossCalculation() {
 
 // 8. Reproducibilidad y determinismo de la simulación secuencial
 void testSequentialEngineReproducibility() {
-    std::cout << "[TEST 8/8] Ejecutando: testSequentialEngineReproducibility...\n";
+    std::cout << "[TEST 8/10] Ejecutando: testSequentialEngineReproducibility...\n";
 
     SimulationConfig cfg = ConfigLoader::createDefault();
     cfg.gridConfig.rows = 15;
@@ -234,6 +235,8 @@ void testSequentialEngineReproducibility() {
 
     assert(res1.status == "completed");
     assert(res2.status == "completed");
+    assert(res1.speedup.has_value() && res1.speedup.value() == 1.0);
+    assert(res1.efficiency.has_value() && res1.efficiency.value() == 100.0);
     assert(res1.timelineData.size() == 60);
     assert(res2.timelineData.size() == 60);
 
@@ -247,7 +250,66 @@ void testSequentialEngineReproducibility() {
     std::cout << "  -> PASÓ: Determinismo numérico bit a bit confirmado para línea base secuencial T1.\n";
 }
 
-int main() {
+void testOptionalMetricsSerialization() {
+    std::cout << "[TEST 9/10] Ejecutando: testOptionalMetricsSerialization...\n";
+
+    SimulationResult result;
+    result.executionTimeSeconds = 0.123;
+    result.speedup = std::nullopt;
+    result.efficiency = std::nullopt;
+
+    std::string json = JsonSerializer::serializeResult(result, false);
+    assert(json.find("\"speedup\": null") != std::string::npos);
+    assert(json.find("\"efficiency\": null") != std::string::npos);
+    assert(json.find("\"executionTimeSeconds\": 0.123") != std::string::npos);
+
+    result.speedup = 3.85;
+    result.efficiency = 96.25;
+    json = JsonSerializer::serializeResult(result, false);
+    assert(json.find("\"speedup\": 3.850") != std::string::npos);
+    assert(json.find("\"efficiency\": 96.250") != std::string::npos);
+
+    std::cout << "  -> PASÓ: speedup y eficiencia nulos se serializan como JSON null.\n";
+}
+
+void testParallelEnginesDoNotReportFictitiousSpeedup() {
+    std::cout << "[TEST 10/10] Ejecutando: testParallelEnginesDoNotReportFictitiousSpeedup...\n";
+
+    SimulationConfig cfg = ConfigLoader::createDefault();
+    cfg.gridConfig.rows = 8;
+    cfg.gridConfig.cols = 8;
+    cfg.simulationDays = 5;
+    cfg.openmpThreads = 2;
+    cfg.mpiProcesses = 1;
+    cfg.nodesCount = 1;
+
+    OpenMPEngine openmpEngine(cfg);
+    auto openmpResult = openmpEngine.run();
+    assert(openmpResult.status == "completed");
+    assert(openmpResult.executionTimeSeconds > 0.0);
+    assert(!openmpResult.speedup.has_value());
+    assert(!openmpResult.efficiency.has_value());
+
+    MpiEngine mpiEngine(cfg);
+    auto mpiResult = mpiEngine.run();
+    assert(mpiResult.status == "completed");
+    assert(mpiResult.executionTimeSeconds > 0.0);
+    assert(!mpiResult.speedup.has_value());
+    assert(!mpiResult.efficiency.has_value());
+
+    HybridEngine hybridEngine(cfg);
+    auto hybridResult = hybridEngine.run();
+    assert(hybridResult.status == "completed");
+    assert(hybridResult.executionTimeSeconds > 0.0);
+    assert(!hybridResult.speedup.has_value());
+    assert(!hybridResult.efficiency.has_value());
+
+    std::cout << "  -> PASÓ: motores paralelos registran tiempo real y métricas no disponibles.\n";
+}
+
+int main(int argc, char** argv) {
+    MPI_Init(&argc, &argv);
+
     std::cout << "===============================================================\n"
               << "      AGROCHACO — SUITE EXPANDIDA DE PRUEBAS TÉCNICAS          \n"
               << "===============================================================\n\n";
@@ -260,7 +322,10 @@ int main() {
     testProlongedDroughtAndPmpConvergence();
     testFao33YieldLossCalculation();
     testSequentialEngineReproducibility();
+    testOptionalMetricsSerialization();
+    testParallelEnginesDoNotReportFictitiousSpeedup();
 
-    std::cout << "\n[OK] TODAS LAS PRUEBAS UNITARIAS Y FÍSICAS PASARON CON ÉXITO (8/8)\n\n";
+    std::cout << "\n[OK] TODAS LAS PRUEBAS UNITARIAS Y FÍSICAS PASARON CON ÉXITO (10/10)\n\n";
+    MPI_Finalize();
     return 0;
 }

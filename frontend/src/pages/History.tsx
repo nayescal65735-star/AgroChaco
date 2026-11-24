@@ -4,6 +4,7 @@ import { useSimulations } from '../context';
 import { Card } from '../components/common/Card';
 import { StatusBadge } from '../components/common/StatusBadge';
 import { EngineBadge } from '../components/common/EngineBadge';
+import { SpeedupValue } from '../components/common/PerformanceMetricValue';
 import type { SimulationResult } from '../types';
 import {
   History as HistoryIcon,
@@ -244,7 +245,7 @@ export function History() {
                     </td>
                     <td>
                       <span style={{ fontWeight: 700, color: 'var(--agri-green)' }}>
-                        {sim.speedup !== undefined ? `${sim.speedup.toFixed(2)}×` : 'Pendiente'}
+                        <SpeedupValue value={sim.speedup} />
                       </span>
                     </td>
                     <td>

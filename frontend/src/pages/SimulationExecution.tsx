@@ -5,6 +5,10 @@ import { Card } from '../components/common/Card';
 import { StatusBadge } from '../components/common/StatusBadge';
 import { EngineBadge } from '../components/common/EngineBadge';
 import {
+  EfficiencyValue,
+  SpeedupValue,
+} from '../components/common/PerformanceMetricValue';
+import {
   Terminal,
   Activity,
   CheckCircle2,
@@ -361,12 +365,12 @@ export function SimulationExecution() {
               Aceleración / Speedup
             </div>
             <div style={{ fontSize: '0.98rem', fontWeight: 700, color: 'var(--gold-dark)', marginTop: '0.2rem' }}>
-              {runningSim.speedup != null
-                ? `${runningSim.speedup.toFixed(2)}×`
-                : 'Pendiente'}
-              {' '}({runningSim.efficiency != null
-                ? `${(runningSim.efficiency <= 1 ? runningSim.efficiency * 100 : runningSim.efficiency).toFixed(1)}% Efic.`
-                : 'Eficiencia pendiente'})
+              <SpeedupValue value={runningSim.speedup} />
+              {' · '}
+              <EfficiencyValue
+                efficiency={runningSim.efficiency}
+                speedup={runningSim.speedup}
+              />
             </div>
           </div>
         </div>

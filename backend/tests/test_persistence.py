@@ -263,3 +263,57 @@ def test_eliminar_simulacion(db_session):
     # Verificar que ya no existe
     assert SimulationRepository.obtener_por_id(db_session, sim_id) is None
 
+
+def test_rendimiento_acepta_metricas_hpc_null(db_session):
+    """Speedup y eficiencia sin medición pareada se persisten como NULL."""
+    sim_id = f"SIM-{uuid4().hex[:12].upper()}"
+
+    SimulationRepository.crear_simulacion_con_parametros(
+        db_session,
+        {
+            "id": sim_id,
+            "nombre": "Simulacion Metricas Null",
+            "fuente_datos": "SENAMHI",
+            "escenario": "historico",
+            "cantidad_escenarios": 1,
+            "dias": 30,
+            "estado": "completed",
+        },
+        {
+            "agua_inicial": Decimal("18.00"),
+            "capacidad_suelo": Decimal("100.00"),
+            "umbral_hidrico": Decimal("50.00"),
+            "configuracion_json": {"engine": "openmp"},
+        },
+    )
+
+    datos_base = {
+        "modalidad": "openmp",
+        "hilos": 4,
+        "procesos": 1,
+        "nodos": 1,
+        "tiempo_segundos": Decimal("0.0425"),
+        "repeticion": 1,
+    }
+
+    explicito = SimulationRepository.guardar_rendimiento(
+        db_session,
+        sim_id,
+        {**datos_base, "speedup": None, "eficiencia": None},
+    )
+    omitido = SimulationRepository.guardar_rendimiento(
+        db_session,
+        sim_id,
+        datos_base,
+    )
+
+    db_session.refresh(explicito)
+    db_session.refresh(omitido)
+
+    assert explicito.speedup is None
+    assert explicito.eficiencia is None
+    assert omitido.speedup is None
+    assert omitido.eficiencia is None
+    assert explicito.tiempo_segundos == Decimal("0.0425")
+    assert omitido.tiempo_segundos == Decimal("0.0425")
+

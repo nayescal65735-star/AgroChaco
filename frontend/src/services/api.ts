@@ -30,8 +30,8 @@ export interface BackendSimulation {
 
   currentDay?: number;
   executionTimeSeconds?: number;
-  speedup?: number;
-  efficiency?: number;
+  speedup?: number | null;
+  efficiency?: number | null;
   averageCWSI?: number;
   soilMoistureFinalPercent?: number;
   yieldLossPercent?: number;

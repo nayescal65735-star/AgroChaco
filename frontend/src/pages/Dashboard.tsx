@@ -6,6 +6,12 @@ import { StatCard } from '../components/common/StatCard';
 import { Card } from '../components/common/Card';
 import { StatusBadge } from '../components/common/StatusBadge';
 import { EngineBadge } from '../components/common/EngineBadge';
+import { SpeedupValue } from '../components/common/PerformanceMetricValue';
+import {
+  formatSpeedup,
+  isMeasuredSpeedup,
+  PERFORMANCE_UNAVAILABLE_MESSAGE,
+} from '../utils/performanceMetrics';
 import {
   Activity,
   Layers,
@@ -66,7 +72,8 @@ export function Dashboard() {
   );
 
   const speedupRecords = completedWithPerformance.filter(
-    (sim): sim is SimulationResult & { speedup: number } => sim.speedup != null
+    (sim): sim is SimulationResult & { speedup: number } =>
+      isMeasuredSpeedup(sim.speedup)
   );
 
   const maxSpeedupSimulation = speedupRecords.reduce<SimulationResult | null>(
@@ -165,14 +172,14 @@ export function Dashboard() {
         <StatCard
           label="Speedup Máximo Registrado"
           value={
-            maxSpeedupSimulation?.speedup != null
-              ? `${maxSpeedupSimulation.speedup.toFixed(2)}×`
+            maxSpeedupSimulation
+              ? formatSpeedup(maxSpeedupSimulation.speedup)
               : 'Sin datos'
           }
           subtext={
             maxSpeedupSimulation
               ? `${ENGINE_LABELS[maxSpeedupSimulation.config.engine]} · ${maxSpeedupSimulation.id}`
-              : 'Sin ejecuciones completadas con speedup'
+              : PERFORMANCE_UNAVAILABLE_MESSAGE
           }
           icon={<Zap size={24} />}
           variant="gold"
@@ -310,7 +317,7 @@ export function Dashboard() {
                 fontSize: '0.88rem',
               }}
             >
-              No hay ejecuciones completadas con speedup registrado en la base de datos.
+              {PERFORMANCE_UNAVAILABLE_MESSAGE}
             </div>
           )}
 
@@ -419,7 +426,7 @@ export function Dashboard() {
                       {sim.executionTimeSeconds !== undefined ? `${sim.executionTimeSeconds}s` : 'Pendiente'}
                     </div>
                     <span style={{ fontSize: '0.75rem', color: 'var(--agri-green)', fontWeight: 600 }}>
-                      {sim.speedup !== undefined ? (sim.speedup > 1 ? `${sim.speedup}x acelerado` : 'Línea base') : 'Pendiente'}
+                      <SpeedupValue value={sim.speedup} compact />
                     </span>
                   </td>
                   <td>

@@ -87,8 +87,8 @@ CREATE TABLE IF NOT EXISTS rendimiento (
     procesos INTEGER NOT NULL DEFAULT 1 CHECK (procesos > 0),
     nodos INTEGER NOT NULL DEFAULT 1 CHECK (nodos > 0),
     tiempo_segundos NUMERIC(12, 4) NOT NULL CHECK (tiempo_segundos >= 0),
-    speedup NUMERIC(10, 4) NOT NULL DEFAULT 1.0000 CHECK (speedup >= 0),
-    eficiencia NUMERIC(8, 4) NOT NULL DEFAULT 1.0000 CHECK (eficiencia >= 0),
+    speedup NUMERIC(10, 4) CHECK (speedup >= 0),
+    eficiencia NUMERIC(8, 4) CHECK (eficiencia >= 0),
     repeticion INTEGER NOT NULL DEFAULT 1 CHECK (repeticion >= 1),
     CONSTRAINT fk_rendimiento_simulacion
         FOREIGN KEY (simulacion_id)

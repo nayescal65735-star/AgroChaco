@@ -174,8 +174,8 @@ struct HPCMetrics {
     double executionTimeSeconds{0.0};
     double computationTimeSeconds{0.0};
     double communicationTimeSeconds{0.0};
-    double speedup{1.0};
-    double efficiencyPercent{100.0};
+    std::optional<double> speedup;
+    std::optional<double> efficiencyPercent;
     double memoryUsageMb{0.0};
     double gflopsEstimate{0.0};
 };
@@ -190,8 +190,8 @@ struct SimulationResult {
     std::string createdAt{""};
     std::string completedAt{""};
     double executionTimeSeconds{0.0};
-    double speedup{1.0};
-    double efficiency{100.0};
+    std::optional<double> speedup;
+    std::optional<double> efficiency;
     double averageCWSI{0.0};
     double soilMoistureFinalPercent{0.0};
     double yieldLossPercent{0.0};

@@ -13,6 +13,7 @@ Gestiona:
 from decimal import Decimal
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import re
@@ -27,6 +28,30 @@ logger = logging.getLogger("agrochaco.motor_service")
 
 # Ruta raíz del proyecto AgroChaco (/home/.../AgroChaco)
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _decimal_hpc_metric(raw_value: Any, *, is_efficiency: bool = False) -> Decimal | None:
+    """Convierte una métrica HPC medida a Decimal, o None si no es medible.
+
+    Los valores nulos, ausentes, no finitos o no positivos no son mediciones válidas.
+    La eficiencia reportada como porcentaje (> 1) se normaliza a fracción decimal.
+    """
+
+    if raw_value is None:
+        return None
+
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return None
+
+    if not math.isfinite(value) or value <= 0.0:
+        return None
+
+    if is_efficiency and value > 1.0:
+        value /= 100.0
+
+    return Decimal(str(round(value, 4)))
 
 
 class MotorServiceError(Exception):
@@ -391,6 +416,8 @@ class MotorService:
         7. Rendimiento.eficiencia: Si el motor reporta porcentaje (> 1.0, ej. 100.0),
            se normaliza a fracción decimal (E <= 1.0) para mantener consistencia con
            las semillas de demostración (seeds.py) y la definición teórica E = S/p.
+           Speedup y eficiencia nulos o no positivos se persisten como NULL: no son
+           mediciones y no deben transformarse en 0.0.
         ========================================================================
         """
         sim_id_seguro = cls.validar_simulation_id(simulation_id)
@@ -433,12 +460,10 @@ class MotorService:
             str(round(float(output_data.get("executionTimeSeconds", 0.0)), 4))
         )
 
-        speedup_raw = float(output_data.get("speedup", 0.0))
-        speedup = Decimal(str(round(max(0.0, speedup_raw), 4)))
-
-        eff_raw = float(output_data.get("efficiency", 0.0))
-        eff_norm = (eff_raw / 100.0) if eff_raw > 1.0 else max(0.0, eff_raw)
-        eficiencia = Decimal(str(round(eff_norm, 4)))
+        speedup = _decimal_hpc_metric(output_data.get("speedup"))
+        eficiencia = _decimal_hpc_metric(
+            output_data.get("efficiency"), is_efficiency=True
+        )
 
         hilos = 1
         procesos = 1

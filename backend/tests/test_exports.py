@@ -9,7 +9,9 @@ Verifica:
 6. Correcta serialización de tipos Decimal y fechas ISO-8601.
 """
 
+import csv
 from decimal import Decimal
+import io
 import json
 import os
 from pathlib import Path
@@ -179,6 +181,58 @@ def test_exportar_eventos_y_rendimientos_csv(db_session):
     assert "ID_Rendimiento,ID_Simulacion,Modalidad,Hilos,Procesos" in rend_csv
     assert "hibrido" in rend_csv
     assert "18.7500" in rend_csv
+
+
+def test_exportar_metricas_hpc_no_disponibles(db_session):
+    """NULL se exporta como null en JSON y vacío en CSV, nunca como 0.0 medido."""
+    sim_id = f"SIM-NULL-{uuid4().hex[:8].upper()}"
+
+    SimulationRepository.crear_simulacion_con_parametros(
+        db_session,
+        {
+            "id": sim_id,
+            "nombre": "Simulación Sin T1 Pareado",
+            "fuente_datos": "SENAMHI",
+            "escenario": "historico",
+            "cantidad_escenarios": 1,
+            "dias": 30,
+            "estado": "completed",
+        },
+        {
+            "agua_inicial": Decimal("18.00"),
+            "capacidad_suelo": Decimal("100.00"),
+            "umbral_hidrico": Decimal("50.00"),
+            "configuracion_json": {"engine": "mpi"},
+        },
+    )
+
+    SimulationRepository.guardar_rendimiento(
+        db_session,
+        sim_id,
+        {
+            "modalidad": "mpi",
+            "hilos": 1,
+            "procesos": 2,
+            "nodos": 1,
+            "tiempo_segundos": Decimal("0.0682"),
+            "speedup": None,
+            "eficiencia": None,
+            "repeticion": 1,
+        },
+    )
+
+    sim = SimulationRepository.obtener_por_id(db_session, sim_id)
+
+    data = ExportService.exportar_simulacion_json(sim)
+    assert data["rendimiento"][0]["speedup"] is None
+    assert data["rendimiento"][0]["eficiencia"] is None
+    assert data["rendimiento"][0]["tiempoSegundos"] == 0.0682
+
+    rend_csv = ExportService.exportar_rendimientos_csv(sim.rendimientos)
+    filas = list(csv.reader(io.StringIO(rend_csv)))
+    assert filas[1][7] == ""
+    assert filas[1][8] == ""
+    assert "0.0000" not in rend_csv
 
 
 def test_exportar_simulacion_nula():

@@ -4,6 +4,10 @@ import { Card } from '../components/common/Card';
 import { StatCard } from '../components/common/StatCard';
 import { EngineBadge } from '../components/common/EngineBadge';
 import {
+  EfficiencyValue,
+  SpeedupValue,
+} from '../components/common/PerformanceMetricValue';
+import {
   Zap,
   Server,
   Layers,
@@ -476,13 +480,6 @@ export function PerformanceComparison() {
                       ? `${procs} procesos MPI`
                       : `${procs} procs × ${threads} hilos (${procs * threads} trabajadores)`;
 
-                  const effVal =
-                    sim.efficiency != null
-                      ? sim.efficiency <= 1
-                        ? sim.efficiency * 100
-                        : sim.efficiency
-                      : null;
-
                   return (
                     <tr key={sim.id}>
                       <td>
@@ -509,10 +506,15 @@ export function PerformanceComparison() {
                       </td>
                       <td>
                         <span style={{ fontWeight: 700, color: 'var(--agri-green)' }}>
-                          {sim.speedup != null ? `${sim.speedup.toFixed(2)}×` : '-'}
+                          <SpeedupValue value={sim.speedup} />
                         </span>
                       </td>
-                      <td>{effVal != null ? `${effVal.toFixed(1)}%` : '-'}</td>
+                      <td>
+                        <EfficiencyValue
+                          efficiency={sim.efficiency}
+                          speedup={sim.speedup}
+                        />
+                      </td>
                       <td>{sim.averageCWSI != null ? sim.averageCWSI.toFixed(3) : '-'}</td>
                     </tr>
                   );

@@ -106,8 +106,8 @@ export interface SimulationResult {
   createdAt: string;
   completedAt?: string;
   executionTimeSeconds?: number;
-  speedup?: number;
-  efficiency?: number;
+  speedup?: number | null;
+  efficiency?: number | null;
   averageCWSI?: number;
   soilMoistureFinalPercent?: number;
   yieldLossPercent?: number;
