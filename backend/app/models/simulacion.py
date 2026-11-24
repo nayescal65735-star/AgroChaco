@@ -101,6 +101,12 @@ class Simulacion(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    trabajos = relationship(
+        "SimulationJob",
+        back_populates="simulacion",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     def __repr__(self) -> str:
         return f"<Simulacion(id='{self.id}', nombre='{self.nombre}', estado='{self.estado}')>"

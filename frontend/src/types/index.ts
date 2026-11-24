@@ -47,7 +47,48 @@ export interface CornVariety {
 
 export type SimulationEngine = 'secuencial' | 'openmp' | 'mpi' | 'hibrido';
 
-export type SimulationStatus = 'pending' | 'running' | 'completed' | 'failed' | 'paused';
+export type SimulationStatus =
+  | 'pending'
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'paused'
+  | 'canceled';
+
+export type SimulationJobStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'canceled';
+
+export interface SimulationJob {
+  job_id: string;
+  simulation_id: string;
+  estado: SimulationJobStatus;
+  status: SimulationJobStatus;
+  progressPercent: number;
+  currentDay: number | null;
+  pid: number | null;
+  cancelRequested: boolean;
+  createdAt: string;
+  startedAt: string | null;
+  updatedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+  error_message: string | null;
+}
+
+export interface ExecuteSimulationResponse {
+  job_id: string;
+  simulation_id: string;
+  estado: SimulationJobStatus;
+  status: SimulationJobStatus;
+  progressPercent: number;
+  currentDay: number | null;
+  createdAt: string | null;
+}
 
 export type DroughtScenario = 'historico' | 'moderado_ssp245' | 'extremo_ssp585' | 'sequia_recente_2023';
 

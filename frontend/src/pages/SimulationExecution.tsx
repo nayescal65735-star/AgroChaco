@@ -8,6 +8,7 @@ import {
   EfficiencyValue,
   SpeedupValue,
 } from '../components/common/PerformanceMetricValue';
+import { mensajeErrorApi } from '../services/api';
 import {
   Terminal,
   Activity,
@@ -16,6 +17,7 @@ import {
   Play,
   RefreshCw,
   AlertCircle,
+  Ban,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -27,12 +29,18 @@ import {
   CartesianGrid,
 } from 'recharts';
 
+const ESTADOS_TERMINALES = new Set(['completed', 'failed', 'canceled']);
+
 export function SimulationExecution() {
   const {
     simulations,
     activeSimulation,
     setActiveSimulationId,
     startExecution,
+    cancelExecution,
+    activeJob,
+    jobErrorsBySimulation,
+    clearJobError,
   } = useSimulations();
   const navigate = useNavigate();
   const location = useLocation();
@@ -43,74 +51,96 @@ export function SimulationExecution() {
     location.state as { autoExecuteId?: string } | null
   )?.autoExecuteId;
   const [isExecuting, setIsExecuting] = useState(false);
+  const [isCanceling, setIsCanceling] = useState(false);
   const [executionError, setExecutionError] = useState<string | null>(null);
   const [executionSuccess, setExecutionSuccess] = useState<string | null>(null);
 
-  // Seleccionar la simulación activa, una en ejecución o la primera disponible
-  const runningSim = activeSimulation || simulations.find((s) => s.status === 'running') || simulations[0];
+  const runningSim =
+    activeSimulation ||
+    simulations.find((simulation) => simulation.status === 'running') ||
+    simulations[0];
+
+  const trabajoEnCurso =
+    activeJob !== null && !ESTADOS_TERMINALES.has(activeJob.status);
+  const flujoEnCurso =
+    trabajoEnCurso ||
+    runningSim?.status === 'running' ||
+    runningSim?.status === 'queued';
+  const errorDelTrabajo = runningSim
+    ? jobErrorsBySimulation[runningSim.id]
+    : undefined;
+  const errorVisible = executionError ?? errorDelTrabajo ?? null;
 
   const handleExecute = async () => {
-    if (!runningSim || !runningSim.id || typeof runningSim.id !== 'string') {
+    if (!runningSim || typeof runningSim.id !== 'string') {
       setExecutionError('Identificador de simulación inválido o inexistente.');
       return;
     }
-
-    if (runningSim.status === 'running' || isExecuting) {
+    if (flujoEnCurso || isExecuting) {
       return;
     }
 
     setExecutionError(null);
+    clearJobError(runningSim.id);
     setExecutionSuccess(null);
     setIsExecuting(true);
 
     try {
       await startExecution(runningSim.id);
       setExecutionSuccess(
-        `Simulación '${runningSim.config.name}' (${runningSim.id}) completada exitosamente con el motor C++.`
+        `Trabajo encolado para '${runningSim.config.name}'. El progreso se actualizará desde el worker.`
       );
-    } catch (err: unknown) {
-      let message = 'Error durante la ejecución del motor de simulación.';
-      if (err && typeof err === 'object') {
-        const anyErr = err as {
-          response?: { data?: { detail?: string } };
-          message?: string;
-        };
-        if (anyErr.response?.data?.detail) {
-          message = anyErr.response.data.detail;
-        } else if (anyErr.message) {
-          message = anyErr.message;
-        }
-      }
-      setExecutionError(message);
+    } catch (error: unknown) {
+      setExecutionError(
+        mensajeErrorApi(error, 'No se pudo encolar la ejecución de la simulación.')
+      );
     } finally {
       setIsExecuting(false);
     }
   };
-    useEffect(() => {
+
+  const handleCancel = async () => {
+    if (!runningSim || !trabajoEnCurso || isCanceling) {
+      return;
+    }
+    setIsCanceling(true);
+    setExecutionError(null);
+    setExecutionSuccess(null);
+    try {
+      await cancelExecution(runningSim.id);
+      setExecutionSuccess(
+        'Cancelación solicitada. El worker confirmará el estado final del trabajo.'
+      );
+    } catch (error: unknown) {
+      setExecutionError(
+        mensajeErrorApi(error, 'No se pudo solicitar la cancelación del trabajo.')
+      );
+    } finally {
+      setIsCanceling(false);
+    }
+  };
+
+  const handleExecuteRef = useRef(handleExecute);
+
+  useEffect(() => {
+    handleExecuteRef.current = handleExecute;
+  });
+
+  useEffect(() => {
     if (!autoExecuteId) return;
-
-    if (autoExecutionStarted.current === autoExecuteId) {
-      return;
-    }
-
-    if (!runningSim || runningSim.id !== autoExecuteId) {
-      return;
-    }
+    if (autoExecutionStarted.current === autoExecuteId) return;
+    if (!runningSim || runningSim.id !== autoExecuteId) return;
 
     autoExecutionStarted.current = autoExecuteId;
+    if (window.history.state?.usr) {
+      window.history.replaceState(
+        { ...window.history.state, usr: null },
+        ''
+      );
+    }
+    void handleExecuteRef.current();
+  }, [autoExecuteId, runningSim]);
 
-    navigate(location.pathname, {
-      replace: true,
-      state: null,
-    });
-
-    void handleExecute();
-  }, [
-    autoExecuteId,
-    runningSim,
-    navigate,
-    location.pathname,
-  ]);
   if (!runningSim) {
     return (
       <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
@@ -129,16 +159,27 @@ export function SimulationExecution() {
     );
   }
 
-  // Calculate current phenological stage based on progress / days
-  const currentDay = runningSim.currentDay || Math.floor((runningSim.progressPercent / 100) * (runningSim.config.simulationDays || 120));
-  let currentStage = 'Emergencia (VE - V2)';
-  if (currentDay > 15 && currentDay <= 45) currentStage = 'Desarrollo Vegetativo (V6 - V12)';
-  else if (currentDay > 45 && currentDay <= 68) currentStage = 'Floración y Polinización (R1)';
-  else if (currentDay > 68 && currentDay <= 95) currentStage = 'Llenado de Grano (R2 - R4)';
-  else if (currentDay > 95) currentStage = 'Madurez Fisiológica (R6)';
+  const currentDay = runningSim.currentDay;
+  let currentStage = 'Sin día confirmado por el motor';
+  if (currentDay !== undefined) {
+    currentStage = 'Emergencia (VE - V2)';
+    if (currentDay > 15 && currentDay <= 45) {
+      currentStage = 'Desarrollo Vegetativo (V6 - V12)';
+    } else if (currentDay > 45 && currentDay <= 68) {
+      currentStage = 'Floración y Polinización (R1)';
+    } else if (currentDay > 68 && currentDay <= 95) {
+      currentStage = 'Llenado de Grano (R2 - R4)';
+    } else if (currentDay > 95) {
+      currentStage = 'Madurez Fisiológica (R6)';
+    }
+  }
 
-  // Timeline slice up to current day
-  const visibleTimeline = runningSim.timelineData.slice(0, Math.max(5, currentDay));
+  const visibleTimeline =
+    currentDay === undefined
+      ? runningSim.timelineData
+      : runningSim.timelineData.filter((punto) => punto.day <= currentDay);
+  const resultadosCompletos =
+    runningSim.status === 'completed' && runningSim.timelineData.length > 0;
 
   return (
     <div>
@@ -146,52 +187,44 @@ export function SimulationExecution() {
         <div>
           <h1 className="page-title">Ejecución &amp; Resultados (HPC)</h1>
           <p className="page-description">
-            Ejecución del motor C++ y consulta de los resultados y logs devueltos por FastAPI.
+            Ejecución asíncrona del motor C++ y consulta de los resultados y logs devueltos por FastAPI.
           </p>
         </div>
 
-        {/* Quick selector of active simulation and action button */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           <select
             className="form-select"
             value={runningSim.id}
-            onChange={(e) => {
-              setActiveSimulationId(e.target.value);
+            onChange={(event) => {
+              setActiveSimulationId(event.target.value);
               setExecutionError(null);
               setExecutionSuccess(null);
             }}
             style={{ width: 'auto', fontWeight: 600 }}
           >
-            {simulations.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.id}: {s.config.name.substring(0, 32)}... ({s.status})
+            {simulations.map((simulation) => (
+              <option key={simulation.id} value={simulation.id}>
+                {simulation.id}: {simulation.config.name.substring(0, 32)}... ({simulation.status})
               </option>
             ))}
           </select>
 
           <button
             type="button"
-            className={`btn ${runningSim.status === 'completed' ? 'btn-outline' : 'btn-primary'}`}
-            disabled={isExecuting || runningSim.status === 'running'}
+            className={`btn ${flujoEnCurso ? 'btn-outline' : 'btn-primary'}`}
+            disabled={flujoEnCurso || isExecuting}
             onClick={handleExecute}
             style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
             title={
-              isExecuting || runningSim.status === 'running'
-                ? 'Ejecución en curso...'
-                : runningSim.status === 'completed'
-                ? 'Re-ejecutar simulación con motor C++'
-                : 'Iniciar ejecución en motor C++'
+              flujoEnCurso
+                ? 'La simulación tiene un trabajo en curso'
+                : 'Encolar ejecución en el worker del backend'
             }
           >
-            {isExecuting || runningSim.status === 'running' ? (
+            {flujoEnCurso || isExecuting ? (
               <>
                 <RefreshCw size={16} className="animate-spin" />
-                <span>Ejecutando motor C++...</span>
-              </>
-            ) : runningSim.status === 'completed' ? (
-              <>
-                <RefreshCw size={16} />
-                <span>Re-ejecutar Motor</span>
+                <span>Trabajo en curso...</span>
               </>
             ) : (
               <>
@@ -200,11 +233,30 @@ export function SimulationExecution() {
               </>
             )}
           </button>
+
+          {trabajoEnCurso && activeJob && (
+            <button
+              type="button"
+              className="btn btn-outline"
+              disabled={isCanceling || activeJob.cancelRequested}
+              onClick={handleCancel}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+              title="Solicitar cancelación del trabajo"
+            >
+              <Ban size={16} />
+              <span>
+                {activeJob.cancelRequested
+                  ? 'Cancelación solicitada'
+                  : isCanceling
+                  ? 'Cancelando...'
+                  : 'Cancelar trabajo'}
+              </span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Execution Error Banner */}
-      {executionError && (
+      {errorVisible && (
         <div
           style={{
             padding: '1rem',
@@ -220,12 +272,15 @@ export function SimulationExecution() {
         >
           <AlertCircle size={20} />
           <div style={{ flex: 1, fontSize: '0.9rem' }}>
-            <strong>Error de ejecución:</strong> {executionError}
+            <strong>Estado de la ejecución:</strong> {errorVisible}
           </div>
           <button
             type="button"
             className="btn btn-sm btn-outline"
-            onClick={() => setExecutionError(null)}
+            onClick={() => {
+              setExecutionError(null);
+              clearJobError(runningSim.id);
+            }}
             style={{ borderColor: '#fca5a5', color: '#991b1b' }}
           >
             Cerrar
@@ -233,7 +288,6 @@ export function SimulationExecution() {
         </div>
       )}
 
-      {/* Execution Success Banner */}
       {executionSuccess && (
         <div
           style={{
@@ -261,7 +315,6 @@ export function SimulationExecution() {
         </div>
       )}
 
-      {/* Main Execution Banner / Status Card */}
       <Card
         className="mb-6"
         title={
@@ -282,11 +335,12 @@ export function SimulationExecution() {
           </div>
         }
       >
-        {/* Progress Bar */}
         <div style={{ margin: '1rem 0' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.88rem' }}>
             <span style={{ fontWeight: 700, color: 'var(--navy)' }}>
-              Progreso del Ciclo Agrícola: Día {currentDay} de {runningSim.config.simulationDays} días
+              {currentDay === undefined
+                ? 'Día de ciclo: pendiente de datos del motor'
+                : `Progreso del Ciclo Agrícola: Día ${currentDay} de ${runningSim.config.simulationDays} días`}
             </span>
             <span style={{ fontWeight: 800, color: 'var(--agri-green)' }}>
               {runningSim.progressPercent}%
@@ -310,6 +364,8 @@ export function SimulationExecution() {
                 background:
                   runningSim.status === 'completed'
                     ? 'var(--agri-green)'
+                    : runningSim.status === 'canceled' || runningSim.status === 'failed'
+                    ? 'var(--status-danger)'
                     : runningSim.status === 'paused'
                     ? 'var(--status-warning)'
                     : 'linear-gradient(90deg, var(--agri-green) 0%, var(--gold) 100%)',
@@ -320,7 +376,6 @@ export function SimulationExecution() {
           </div>
         </div>
 
-        {/* Simulation Submetrics Grid */}
         <div
           style={{
             display: 'grid',
@@ -342,7 +397,7 @@ export function SimulationExecution() {
 
           <div style={{ padding: '0.75rem', background: 'var(--bg-main)', borderRadius: 'var(--radius-md)' }}>
             <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
-              Humedad del Suelo Actual
+              Humedad del Suelo Final
             </div>
             <div style={{ fontSize: '0.98rem', fontWeight: 700, color: '#0284c7', marginTop: '0.2rem' }}>
               {runningSim.soilMoistureFinalPercent != null
@@ -353,10 +408,12 @@ export function SimulationExecution() {
 
           <div style={{ padding: '0.75rem', background: 'var(--bg-main)', borderRadius: 'var(--radius-md)' }}>
             <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
-              Estrés CWSI Actual
+              Estrés CWSI
             </div>
             <div style={{ fontSize: '0.98rem', fontWeight: 700, color: '#dc2626', marginTop: '0.2rem' }}>
-              {runningSim.averageCWSI !== undefined ? runningSim.averageCWSI.toFixed(3) : 'Pendiente de resultados reales'}
+              {runningSim.averageCWSI !== undefined
+                ? runningSim.averageCWSI.toFixed(3)
+                : 'Pendiente de resultados reales'}
             </div>
           </div>
 
@@ -375,7 +432,7 @@ export function SimulationExecution() {
           </div>
         </div>
 
-        {runningSim.status === 'completed' && (
+        {resultadosCompletos && (
           <div
             style={{
               marginTop: '1.25rem',
@@ -393,7 +450,11 @@ export function SimulationExecution() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', color: '#166534' }}>
               <CheckCircle2 size={20} />
               <span style={{ fontWeight: 700 }}>
-                Simulación completada en {runningSim.executionTimeSeconds} segundos. Convergencia numérica alcanzada.
+                Simulación completada
+                {runningSim.executionTimeSeconds !== undefined
+                  ? ` en ${runningSim.executionTimeSeconds} segundos`
+                  : ''}
+                . Resultados cargados desde el backend.
               </span>
             </div>
             <button
@@ -411,7 +472,6 @@ export function SimulationExecution() {
         )}
       </Card>
 
-      {/* Two Column Layout: Live Stress Evolution vs HPC Cluster Logs */}
       <div
         style={{
           display: 'grid',
@@ -420,7 +480,6 @@ export function SimulationExecution() {
           marginTop: '1.5rem',
         }}
       >
-        {/* Dynamic Stress Timeline */}
         <Card
           title={
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -474,7 +533,6 @@ export function SimulationExecution() {
           </div>
         </Card>
 
-        {/* HPC Cluster Log Stream */}
         <Card
           title={
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -489,18 +547,20 @@ export function SimulationExecution() {
               <div className="terminal-line">
                 <span className="terminal-tag INFO">[INFO]</span>
                 <span className="terminal-msg">
-                  {runningSim.status === 'completed'
+                  {resultadosCompletos
                     ? 'Simulación completada con éxito. Trazas archivadas en results/simulations/.'
-                    : 'No hay registros de ejecución en curso. Presione "Ejecutar Simulación HPC" para iniciar el motor C++.'}
+                    : 'No hay registros de ejecución en curso. El worker actualizará el estado del trabajo.'}
                 </span>
               </div>
-            ) : runningSim.logs.map((log, idx) => (
-              <div key={idx} className="terminal-line">
-                <span className="terminal-time">[{log.timestamp}]</span>
-                <span className={`terminal-tag ${log.level}`}>[{log.level}]</span>
-                <span className="terminal-msg">{log.message}</span>
-              </div>
-            ))}
+            ) : (
+              runningSim.logs.map((log, indice) => (
+                <div key={indice} className="terminal-line">
+                  <span className="terminal-time">[{log.timestamp}]</span>
+                  <span className={`terminal-tag ${log.level}`}>[{log.level}]</span>
+                  <span className="terminal-msg">{log.message}</span>
+                </div>
+              ))
+            )}
           </div>
         </Card>
       </div>

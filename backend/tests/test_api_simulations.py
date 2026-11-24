@@ -33,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from typing import Any
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
@@ -103,6 +104,15 @@ class TestApiSimulationsPostgres(unittest.TestCase):
     def tearDown(self):
         """Cierra la sesión de base de datos tras cada prueba."""
         self.db.close()
+
+    def _configuracion_de_simulacion(self, sim_id: str) -> dict[str, Any]:
+        """Recupera la configuración persistida para ejecutar el motor directamente."""
+        simulacion = SimulationRepository.obtener_por_id(
+            self.db, sim_id, cargar_relaciones=True
+        )
+        if simulacion is None or simulacion.parametro is None:
+            self.fail(f"No hay configuración persistida para {sim_id}")
+        return simulacion.parametro.configuracion_json
 
     def _sample_payload(self, **overrides) -> SimulationCreate:
         """Genera un payload válido para creación de simulación."""
@@ -476,9 +486,20 @@ class TestApiSimulationsPostgres(unittest.TestCase):
             return proc
 
         mock_run.side_effect = fake_motor_run
+        config_dict = self._configuracion_de_simulacion(sim_id)
 
         try:
-            resp = execute_simulation(sim_id, db=self.db)
+            ejecucion = MotorService.ejecutar(
+                simulation_id=sim_id,
+                config_dict=config_dict,
+            )
+            MotorService.persistir_resultados_en_db(
+                db=self.db,
+                simulation_id=sim_id,
+                config_dict=config_dict,
+                resultado_ejecucion=ejecucion,
+            )
+            resp = get_simulation(sim_id, db=self.db)
 
             self.assertEqual(resp["id"], sim_id)
             self.assertEqual(resp["status"], "completed")
@@ -540,25 +561,36 @@ class TestApiSimulationsPostgres(unittest.TestCase):
             return p
 
         mock_run.side_effect = fake_motor_run
+        config_dict = self._configuracion_de_simulacion(sim_id)
         # Inducir fallo en la persistencia del rendimiento
         mock_rend.side_effect = RuntimeError("Error inducido de I/O en base de datos")
 
         try:
-            with self.assertRaises(HTTPException) as ctx:
-                execute_simulation(sim_id, db=self.db)
-            self.assertEqual(ctx.exception.status_code, 500)
+            ejecucion = MotorService.ejecutar(
+                simulation_id=sim_id,
+                config_dict=config_dict,
+            )
+            with self.assertRaises(RuntimeError):
+                MotorService.persistir_resultados_en_db(
+                    db=self.db,
+                    simulation_id=sim_id,
+                    config_dict=config_dict,
+                    resultado_ejecucion=ejecucion,
+                )
 
             # Verificar que NO quedó un Resultado huérfano persistido
             stmt_res = select(Resultado).where(Resultado.simulacion_id == sim_id)
             res_db = self.db.execute(stmt_res).scalar_one_or_none()
             self.assertIsNone(res_db, "El rollback atómico debe impedir la persistencia parcial de Resultado.")
 
-            # La simulación debe quedar marcada como 'failed'
             sim_db = self.db.get(Simulacion, sim_id)
-            self.assertEqual(sim_db.estado, "failed")
+            self.assertEqual(sim_db.estado, "pending")
 
         finally:
             delete_simulation(sim_id, db=self.db)
+            perm_file = PROJECT_ROOT / "results" / "simulations" / f"{sim_id}.json"
+            if perm_file.exists():
+                perm_file.unlink(missing_ok=True)
 
     # --------------------------------------------------------------------------
     # 5. Semántica de Métricas y Límites
@@ -713,7 +745,15 @@ class TestApiSimulationsPostgres(unittest.TestCase):
         sim_id = created["id"]
 
         try:
-            resultado = execute_simulation(sim_id, db=self.db)
+            config_dict = self._configuracion_de_simulacion(sim_id)
+            ejecucion = MotorService.ejecutar(sim_id, config_dict)
+            MotorService.persistir_resultados_en_db(
+                db=self.db,
+                simulation_id=sim_id,
+                config_dict=config_dict,
+                resultado_ejecucion=ejecucion,
+            )
+            resultado = get_simulation(sim_id, db=self.db)
 
             self.assertEqual(resultado["id"], sim_id)
             self.assertEqual(resultado["status"], "completed")

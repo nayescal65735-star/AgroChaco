@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     func,
@@ -21,7 +22,11 @@ class EventoEjecucion(Base):
 
     __tablename__ = "eventos_ejecucion"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
     simulacion_id = Column(
         String(36),
         ForeignKey("simulaciones.id", ondelete="CASCADE"),

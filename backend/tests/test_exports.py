@@ -19,11 +19,13 @@ import sys
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException, Response
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.api.simulations import export_simulation_csv, export_simulation_json
 from app.db.repository import SimulationRepository
 from app.models import EventoEjecucion, Rendimiento, Simulacion
 from app.services.export_service import ExportService
@@ -239,3 +241,105 @@ def test_exportar_simulacion_nula():
     """Verifica que el servicio lance ValueError si se intenta exportar una simulación nula."""
     with pytest.raises(ValueError):
         ExportService.exportar_simulacion_json(None)  # type: ignore
+
+
+def test_endpoint_exportar_json(db_session):
+    """Verifica que el endpoint JSON devuelva la simulación completa como archivo descargable."""
+    sim_id = f"SIM-API-JSON-{uuid4().hex[:8].upper()}"
+    _crear_simulacion_completa(db_session, sim_id)
+
+    response = export_simulation_json(sim_id, db=db_session)
+
+    assert isinstance(response, Response)
+    assert response.media_type == "application/json"
+    assert response.headers["content-type"] == "application/json"
+    assert response.headers["content-disposition"] == f'attachment; filename="{sim_id}.json"'
+
+    contenido = response.body.decode("utf-8")
+    data = json.loads(contenido)
+    assert data["id"] == sim_id
+    assert data["parametros"]["configuracion"]["zone"] == "yacuiba"
+    assert data["resultados"]["deficitMedio"] == 0.3120
+    assert data["rendimiento"][0]["modalidad"] == "hibrido"
+    assert data["fuentesDatos"][0]["nombreArchivo"] == "serie_yacuiba_2024.csv"
+    assert data["eventos"][0]["nivel"] == "INFO"
+
+
+def test_endpoint_exportar_csv_solo_simulacion_solicitada(db_session):
+    """Verifica que el CSV exportado contenga únicamente la simulación solicitada."""
+    sim_id = f"SIM-API-CSV-{uuid4().hex[:8].upper()}"
+    otro_id = f"SIM-API-OTRA-{uuid4().hex[:8].upper()}"
+    _crear_simulacion_completa(db_session, sim_id)
+    _crear_simulacion_completa(db_session, otro_id)
+
+    response = export_simulation_csv(sim_id, db=db_session)
+
+    assert isinstance(response, Response)
+    assert response.media_type == "text/csv"
+    assert response.headers["content-type"] == "text/csv; charset=utf-8"
+    assert response.headers["content-disposition"] == f'attachment; filename="{sim_id}.csv"'
+
+    contenido = response.body.decode("utf-8")
+    filas = list(csv.reader(io.StringIO(contenido)))
+    assert filas[0][0] == "ID_Simulacion"
+    assert len(filas) == 2
+    assert filas[1][0] == sim_id
+    assert otro_id not in contenido
+
+
+def test_endpoint_exportar_id_inexistente_devuelve_404(db_session):
+    """Verifica que ambos endpoints devuelvan HTTP 404 para un ID inexistente."""
+    sim_id = "SIM-INEXISTENTE-999"
+
+    for endpoint in (export_simulation_json, export_simulation_csv):
+        with pytest.raises(HTTPException) as exc_info:
+            endpoint(sim_id, db=db_session)
+        assert exc_info.value.status_code == 404
+
+
+def test_endpoint_exportar_json_conserva_metricas_no_disponibles(db_session):
+    """Verifica que speedup y eficiencia nulos lleguen como null al JSON del endpoint."""
+    sim_id = f"SIM-API-NULL-{uuid4().hex[:8].upper()}"
+
+    SimulationRepository.crear_simulacion_con_parametros(
+        db_session,
+        {
+            "id": sim_id,
+            "nombre": "Simulación API Sin T1 Pareado",
+            "fuente_datos": "SENAMHI",
+            "escenario": "historico",
+            "cantidad_escenarios": 1,
+            "dias": 30,
+            "estado": "completed",
+        },
+        {
+            "agua_inicial": Decimal("18.00"),
+            "capacidad_suelo": Decimal("100.00"),
+            "umbral_hidrico": Decimal("50.00"),
+            "configuracion_json": {"engine": "mpi"},
+        },
+    )
+    SimulationRepository.guardar_rendimiento(
+        db_session,
+        sim_id,
+        {
+            "modalidad": "mpi",
+            "hilos": 1,
+            "procesos": 2,
+            "nodos": 1,
+            "tiempo_segundos": Decimal("0.0682"),
+            "speedup": None,
+            "eficiencia": None,
+            "repeticion": 1,
+        },
+    )
+
+    response = export_simulation_json(sim_id, db=db_session)
+    contenido = response.body.decode("utf-8")
+    data = json.loads(contenido)
+
+    assert data["rendimiento"][0]["speedup"] is None
+    assert data["rendimiento"][0]["eficiencia"] is None
+    assert '"speedup": null' in contenido
+    assert '"eficiencia": null' in contenido
+    assert "0.0000" not in contenido

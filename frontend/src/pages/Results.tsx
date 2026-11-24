@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSimulations } from '../context';
+import { simulationService } from '../services/api';
 import { SOIL_INFOS } from '../services/mockData';
 import { Card } from '../components/common/Card';
 import { StatCard } from '../components/common/StatCard';
@@ -31,10 +32,33 @@ import {
   ReferenceLine,
 } from 'recharts';
 
+function descargarArchivo(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const enlace = document.createElement('a');
+  enlace.href = url;
+  enlace.download = filename;
+  document.body.appendChild(enlace);
+
+  try {
+    enlace.click();
+  } finally {
+    document.body.removeChild(enlace);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}
+
+function mensajeErrorExportacion(error: unknown, formato: string): string {
+  const detalle = error instanceof Error && error.message ? ` ${error.message}` : '';
+  return `No se pudo exportar ${formato}. Verifique que la simulación exista y que el backend esté disponible.${detalle}`;
+}
+
 export function Results() {
   const { simulations, activeSimulation, setActiveSimulationId } = useSimulations();
   const navigate = useNavigate();
   const [selectedCell, setSelectedCell] = useState<SpatialCell | null>(null);
+  const [exportando, setExportando] = useState<'json' | 'csv' | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const exportandoRef = useRef(false);
 
   const currentSim = activeSimulation || simulations[0];
 
@@ -66,29 +90,27 @@ export function Results() {
             currentSim.speedup
           )}`;
 
-  const exportJSON = () => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(currentSim, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `${currentSim.id}_agrochaco_results.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-  };
+  const handleExport = async (formato: 'json' | 'csv') => {
+    if (exportandoRef.current || !currentSim) return;
 
-  const exportCSV = () => {
-    let csv = 'Dia,Etapa,ET_Actual_mm,ET_Potencial_mm,CWSI,Humedad_Suelo_Porc,Precipitacion_mm\n';
-    currentSim.timelineData.forEach((row) => {
-      csv += `${row.day},"${row.phenologicalStage}",${row.etActual},${row.etPotential},${row.cwsi},${row.soilMoisture},${row.precipitation}\n`;
-    });
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `${currentSim.id}_timeline.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    exportandoRef.current = true;
+    setExportando(formato);
+    setExportError(null);
+
+    try {
+      const resultado =
+        formato === 'json'
+          ? await simulationService.exportJson(currentSim.id)
+          : await simulationService.exportCsv(currentSim.id);
+      descargarArchivo(resultado.blob, resultado.filename);
+    } catch (error) {
+      setExportError(
+        mensajeErrorExportacion(error, formato === 'json' ? 'el JSON' : 'el CSV')
+      );
+    } finally {
+      exportandoRef.current = false;
+      setExportando(null);
+    }
   };
 
   const getCellColor = (cwsi: number) => {
@@ -123,15 +145,53 @@ export function Results() {
             ))}
           </select>
 
-          <button type="button" className="btn btn-outline btn-sm" onClick={exportCSV}>
-            <FileSpreadsheet size={16} />
-            Exportar CSV
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            onClick={() => void handleExport('csv')}
+            disabled={exportando !== null}
+          >
+            {exportando === 'csv' ? (
+              'Exportando CSV...'
+            ) : (
+              <>
+                <FileSpreadsheet size={16} />
+                Exportar CSV
+              </>
+            )}
           </button>
-          <button type="button" className="btn btn-outline btn-sm" onClick={exportJSON}>
-            <FileCode size={16} />
-            Exportar JSON
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            onClick={() => void handleExport('json')}
+            disabled={exportando !== null}
+          >
+            {exportando === 'json' ? (
+              'Exportando JSON...'
+            ) : (
+              <>
+                <FileCode size={16} />
+                Exportar JSON
+              </>
+            )}
           </button>
         </div>
+
+        {exportError && (
+          <div
+            role="alert"
+            style={{
+              flexBasis: '100%',
+              padding: '0.75rem 1rem',
+              borderRadius: 'var(--radius-sm)',
+              background: '#fee2e2',
+              color: '#991b1b',
+              fontSize: '0.85rem',
+            }}
+          >
+            {exportError}
+          </div>
+        )}
       </div>
 
       {/* KPI Cards of the Simulation */}

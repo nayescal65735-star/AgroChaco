@@ -7,9 +7,17 @@ import type {
   TimelineDataPoint,
   SpatialCell,
   SimulationLog,
+  SimulationJob,
+  ExecuteSimulationResponse,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001';
+const intervaloConfigurado = Number(import.meta.env.VITE_JOB_POLL_INTERVAL_MS);
+
+export const JOB_POLL_INTERVAL_MS =
+  Number.isFinite(intervaloConfigurado) && intervaloConfigurado >= 250
+    ? intervaloConfigurado
+    : 2000;
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -48,6 +56,62 @@ export interface BackendSimulation {
 export interface SimulationListResponse {
   total: number;
   simulations: BackendSimulation[];
+}
+
+export interface SimulationExport {
+  blob: Blob;
+  filename: string;
+}
+
+function nombreArchivoSeguro(simulationId: string, extension: string): string {
+  const seguro =
+    simulationId.replace(/[^A-Za-z0-9_-]/g, '_') || 'simulacion';
+  return `${seguro}.${extension}`;
+}
+
+function nombreArchivoDesdeHeader(
+  contentDisposition: unknown,
+  fallback: string
+): string {
+  const cabecera =
+    typeof contentDisposition === 'string' ? contentDisposition : '';
+  const coincidencia = cabecera.match(/filename="?([^";]+)"?/i);
+  const candidato = coincidencia?.[1]?.trim().split(/[/\\]/).pop();
+  return candidato || fallback;
+}
+
+export function mensajeErrorApi(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object') {
+    const datos = error as {
+      response?: { data?: { detail?: unknown } };
+      message?: unknown;
+    };
+    const detalle = datos.response?.data?.detail;
+    if (typeof detalle === 'string' && detalle.trim()) {
+      return detalle;
+    }
+    if (typeof datos.message === 'string' && datos.message.trim()) {
+      return datos.message;
+    }
+  }
+  return fallback;
+}
+
+async function obtenerExportacion(
+  url: string,
+  simulationId: string,
+  extension: string
+): Promise<SimulationExport> {
+  const response = await apiClient.get<Blob>(url, { responseType: 'blob' });
+  const fallback = nombreArchivoSeguro(simulationId, extension);
+
+  return {
+    blob: response.data,
+    filename: nombreArchivoDesdeHeader(
+      response.headers['content-disposition'],
+      fallback
+    ),
+  };
 }
 
 export const systemService = {
@@ -135,13 +199,62 @@ export const simulationService = {
     await apiClient.delete(`/api/simulations/${id}`);
   },
 
-  async execute(id: string): Promise<BackendSimulation> {
-    const response = await apiClient.post<BackendSimulation>(
-      `/api/simulations/${id}/execute`,
+  async execute(id: string): Promise<ExecuteSimulationResponse> {
+    const response = await apiClient.post<ExecuteSimulationResponse>(
+      `/api/simulations/${encodeURIComponent(id)}/execute`,
       {},
-      { timeout: 120000 }
+      { timeout: 15000 }
     );
 
+    if (response.status !== 202) {
+      throw new Error('El backend no aceptó la solicitud de ejecución asíncrona.');
+    }
+    if (!response.data?.job_id) {
+      throw new Error('El backend no devolvió el identificador del trabajo.');
+    }
+
     return response.data;
+  },
+
+  async getJob(jobId: string): Promise<SimulationJob> {
+    const response = await apiClient.get<SimulationJob>(
+      `/api/jobs/${encodeURIComponent(jobId)}`
+    );
+
+    if (!response.data?.job_id) {
+      throw new Error('El backend devolvió un estado de trabajo inválido.');
+    }
+
+    return response.data;
+  },
+
+  async cancelJob(jobId: string): Promise<SimulationJob> {
+    const response = await apiClient.post<SimulationJob>(
+      `/api/jobs/${encodeURIComponent(jobId)}/cancel`,
+      {},
+      { timeout: 15000 }
+    );
+
+    if (!response.data?.job_id) {
+      throw new Error('El backend no confirmó la cancelación del trabajo.');
+    }
+
+    return response.data;
+  },
+
+  async exportJson(id: string): Promise<SimulationExport> {
+    return obtenerExportacion(
+      `/api/simulations/${encodeURIComponent(id)}/export/json`,
+      id,
+      'json'
+    );
+  },
+
+  async exportCsv(id: string): Promise<SimulationExport> {
+    return obtenerExportacion(
+      `/api/simulations/${encodeURIComponent(id)}/export/csv`,
+      id,
+      'csv'
+    );
   },
 };

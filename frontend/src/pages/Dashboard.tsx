@@ -52,7 +52,9 @@ export function Dashboard() {
   const navigate = useNavigate();
 
   const totalSimulations = simulations.length;
-  const runningSimulations = simulations.filter((s) => s.status === 'running').length;
+  const runningSimulations = simulations.filter(
+    (simulation) => simulation.status === 'running' || simulation.status === 'queued'
+  ).length;
   const completedSimulations = simulations.filter((s) => s.status === 'completed').length;
 
   const totalHectares = GRAN_CHACO_ZONES.reduce((acc, z) => acc + z.activeHectares, 0);

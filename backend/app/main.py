@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.database import router as database_router
-from app.api.simulations import router as simulations_router
+from app.api.simulations import jobs_router, router as simulations_router
 
 app = FastAPI(
     title="AgroChaco API",
@@ -40,3 +40,4 @@ def health():
 
 app.include_router(database_router)
 app.include_router(simulations_router)
+app.include_router(jobs_router)

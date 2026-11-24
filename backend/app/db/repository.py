@@ -4,11 +4,13 @@ Implementa operaciones CRUD, transacciones atómicas con manejo estricto de roll
 filtros de consulta de historial (por nombre, estado, fecha, escenario), paginación
 y carga eficiente de entidades relacionadas.
 """
-
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
-from sqlalchemy import desc, func, select
+from uuid import UUID
+
+from sqlalchemy import desc, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models import (
@@ -18,6 +20,13 @@ from app.models import (
     Rendimiento,
     Resultado,
     Simulacion,
+    SimulationJob,
+)
+from app.models.simulation_job import (
+    ESTADOS_ACTIVOS_TRABAJO,
+    ESTADOS_TERMINALES_TRABAJO,
+    ESTADOS_TRABAJO,
+    transiciones_permitidas_desde,
 )
 
 
@@ -210,6 +219,7 @@ class SimulationRepository:
         datos_rendimiento: dict[str, Any],
         nuevo_estado: str = "completed",
         mensaje_evento: str | None = None,
+        commit: bool = True,
     ) -> None:
         """Persiste resultados biofísicos, métricas HPC, estado y evento en una única transacción atómica."""
         try:
@@ -229,7 +239,8 @@ class SimulationRepository:
                     mensaje=mensaje_evento,
                 )
                 db.add(evento)
-            db.commit()
+            if commit:
+                db.commit()
         except Exception as error:
             db.rollback()
             raise RuntimeError(
@@ -408,6 +419,36 @@ class SimulationRepository:
             ) from error
 
     @staticmethod
+    def actualizar_estado_simulacion(
+        db: Session,
+        simulacion_id: str,
+        nuevo_estado: str,
+        *,
+        commit: bool = True,
+    ) -> Simulacion | None:
+        estados = ("pending", "running", "completed", "failed", "paused")
+        if nuevo_estado not in estados:
+            raise ValueError(f"Estado de simulación inválido: {nuevo_estado}")
+
+        stmt = (
+            update(Simulacion)
+            .where(Simulacion.id == simulacion_id)
+            .values(estado=nuevo_estado)
+        )
+        try:
+            resultado = db.execute(stmt, execution_options={"synchronize_session": False})
+            if commit:
+                db.commit()
+            if resultado.rowcount != 1:
+                return None
+            return db.get(Simulacion, simulacion_id)
+        except Exception as error:
+            db.rollback()
+            raise RuntimeError(
+                f"Error al actualizar estado de {simulacion_id}: {error}"
+            ) from error
+
+    @staticmethod
     def eliminar_simulacion(
         db: Session,
         simulacion_id: str,
@@ -426,4 +467,475 @@ class SimulationRepository:
             raise RuntimeError(
                 f"Error al eliminar la simulación {simulacion_id}: {error}"
             ) from error
+
+    @staticmethod
+    def _normalizar_job_id(job_id: UUID | str) -> UUID:
+        return job_id if isinstance(job_id, UUID) else UUID(str(job_id))
+
+    @staticmethod
+    def _normalizar_fecha_utc(valor: datetime | None) -> datetime | None:
+        if valor is None:
+            return None
+        if valor.tzinfo is None:
+            return valor.replace(tzinfo=timezone.utc)
+        return valor.astimezone(timezone.utc)
+
+    @staticmethod
+    def crear_trabajo(
+        db: Session,
+        simulacion_id: str,
+        *,
+        job_id: UUID | str | None = None,
+        worker_id: str | None = None,
+        attempt: int = 1,
+    ) -> SimulationJob:
+        if attempt <= 0:
+            raise ValueError("attempt debe ser mayor que 0")
+        if db.get(Simulacion, simulacion_id) is None:
+            raise ValueError(f"Simulación no encontrada: {simulacion_id}")
+
+        datos: dict[str, Any] = {
+            "simulacion_id": simulacion_id,
+            "worker_id": worker_id,
+            "attempt": attempt,
+        }
+        if job_id is not None:
+            datos["job_id"] = SimulationRepository._normalizar_job_id(job_id)
+
+        try:
+            trabajo = SimulationJob(**datos)
+            db.add(trabajo)
+            db.commit()
+            db.refresh(trabajo)
+            return trabajo
+        except Exception as error:
+            db.rollback()
+            raise RuntimeError(f"Error al crear trabajo para {simulacion_id}: {error}") from error
+
+    @staticmethod
+    def crear_trabajo_unico(
+        db: Session,
+        simulacion_id: str,
+        *,
+        job_id: UUID | str | None = None,
+    ) -> SimulationJob | None:
+        if db.get(Simulacion, simulacion_id) is None:
+            raise ValueError(f"Simulación no encontrada: {simulacion_id}")
+
+        activo = db.execute(
+            select(SimulationJob.job_id).where(
+                SimulationJob.simulacion_id == simulacion_id,
+                SimulationJob.estado.in_(ESTADOS_ACTIVOS_TRABAJO),
+            )
+        ).scalar_one_or_none()
+        if activo is not None:
+            return None
+
+        datos: dict[str, Any] = {"simulacion_id": simulacion_id}
+        if job_id is not None:
+            datos["job_id"] = SimulationRepository._normalizar_job_id(job_id)
+
+        try:
+            trabajo = SimulationJob(**datos)
+            db.add(trabajo)
+            db.commit()
+            db.refresh(trabajo)
+            return trabajo
+        except IntegrityError:
+            db.rollback()
+            return None
+        except Exception as error:
+            db.rollback()
+            raise RuntimeError(f"Error al crear trabajo para {simulacion_id}: {error}") from error
+
+    @staticmethod
+    def obtener_trabajo(db: Session, job_id: UUID | str) -> SimulationJob | None:
+        return db.get(SimulationJob, SimulationRepository._normalizar_job_id(job_id))
+
+    @staticmethod
+    def reclamar_trabajo(
+        db: Session,
+        job_id: UUID | str,
+        worker_id: str,
+        *,
+        lease_seconds: int = 60,
+        simulacion_id: str | None = None,
+    ) -> SimulationJob | None:
+        if not worker_id:
+            raise ValueError("worker_id es obligatorio para reclamar un trabajo")
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds debe ser mayor que 0")
+
+        ahora = datetime.now(timezone.utc)
+        condiciones = [
+            SimulationJob.job_id == SimulationRepository._normalizar_job_id(job_id),
+            SimulationJob.estado == "queued",
+            SimulationJob.cancel_requested.is_(False),
+        ]
+        if simulacion_id is not None:
+            condiciones.append(SimulationJob.simulacion_id == simulacion_id)
+
+        stmt = (
+            update(SimulationJob)
+            .where(*condiciones)
+            .values(
+                estado="running",
+                worker_id=worker_id,
+                heartbeat_at=ahora,
+                lease_expires_at=ahora + timedelta(seconds=lease_seconds),
+                started_at=ahora,
+                updated_at=ahora,
+            )
+        )
+        try:
+            resultado = db.execute(stmt, execution_options={"synchronize_session": False})
+            db.commit()
+            if resultado.rowcount != 1:
+                return None
+            return SimulationRepository.obtener_trabajo(db, job_id)
+        except Exception as error:
+            db.rollback()
+            raise RuntimeError(f"Error al reclamar trabajo {job_id}: {error}") from error
+
+    @staticmethod
+    def actualizar_estado_trabajo(
+        db: Session,
+        job_id: UUID | str,
+        nuevo_estado: str,
+        *,
+        estado_esperado: str | None = None,
+        error_message: str | None = None,
+        progress_percent: int | None = None,
+        current_day: int | None = None,
+        finished_at: datetime | None = None,
+        worker_id: str | None = None,
+        commit: bool = True,
+    ) -> SimulationJob | None:
+        if nuevo_estado not in ESTADOS_TRABAJO:
+            raise ValueError(f"Estado de trabajo inválido: {nuevo_estado}")
+        if estado_esperado is not None and estado_esperado not in ESTADOS_TRABAJO:
+            raise ValueError(f"Estado esperado inválido: {estado_esperado}")
+        if progress_percent is not None and not 0 <= progress_percent <= 100:
+            raise ValueError("progress_percent debe estar entre 0 y 100")
+        if current_day is not None and current_day < 0:
+            raise ValueError("current_day no puede ser negativo")
+
+        trabajo = SimulationRepository.obtener_trabajo(db, job_id)
+        if trabajo is None:
+            return None
+
+        estado_actual = estado_esperado if estado_esperado is not None else trabajo.estado
+        permitidas = transiciones_permitidas_desde(estado_actual)
+        if nuevo_estado not in permitidas:
+            raise ValueError(f"Transición no permitida: {estado_actual} -> {nuevo_estado}")
+
+        ahora = datetime.now(timezone.utc)
+        valores: dict[str, Any] = {"estado": nuevo_estado, "updated_at": ahora}
+        if error_message is not None:
+            valores["error_message"] = error_message
+        if progress_percent is not None:
+            valores["progress_percent"] = progress_percent
+        if current_day is not None:
+            valores["current_day"] = current_day
+        if nuevo_estado in ESTADOS_TERMINALES_TRABAJO:
+            valores["finished_at"] = finished_at or ahora
+            valores["lease_expires_at"] = None
+
+        condiciones = [
+            SimulationJob.job_id == SimulationRepository._normalizar_job_id(job_id),
+            SimulationJob.estado == estado_actual,
+        ]
+        if worker_id is not None:
+            condiciones.append(SimulationJob.worker_id == worker_id)
+        if estado_actual in ESTADOS_ACTIVOS_TRABAJO and nuevo_estado != "canceled":
+            condiciones.append(SimulationJob.cancel_requested.is_(False))
+
+        stmt = update(SimulationJob).where(*condiciones).values(**valores)
+        try:
+            resultado = db.execute(stmt, execution_options={"synchronize_session": False})
+            if commit:
+                db.commit()
+            if resultado.rowcount != 1:
+                return None
+            return SimulationRepository.obtener_trabajo(db, job_id)
+        except Exception as error:
+            db.rollback()
+            raise RuntimeError(f"Error al actualizar trabajo {job_id}: {error}") from error
+
+    @staticmethod
+    def registrar_heartbeat(
+        db: Session,
+        job_id: UUID | str,
+        worker_id: str,
+        *,
+        lease_seconds: int = 60,
+        progress_percent: int | None = None,
+        current_day: int | None = None,
+    ) -> SimulationJob | None:
+        if not worker_id:
+            raise ValueError("worker_id es obligatorio para registrar un heartbeat")
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds debe ser mayor que 0")
+        if progress_percent is not None and not 0 <= progress_percent <= 100:
+            raise ValueError("progress_percent debe estar entre 0 y 100")
+        if current_day is not None and current_day < 0:
+            raise ValueError("current_day no puede ser negativo")
+
+        trabajo = SimulationRepository.obtener_trabajo(db, job_id)
+        if trabajo is None or trabajo.estado != "running":
+            return None
+
+        ahora = datetime.now(timezone.utc)
+        condiciones = [
+            SimulationJob.job_id == SimulationRepository._normalizar_job_id(job_id),
+            SimulationJob.estado == "running",
+            SimulationJob.worker_id == worker_id,
+            or_(
+                SimulationJob.lease_expires_at.is_(None),
+                SimulationJob.lease_expires_at >= ahora,
+            ),
+        ]
+        if progress_percent is not None:
+            condiciones.append(
+                or_(
+                    SimulationJob.progress_percent.is_(None),
+                    SimulationJob.progress_percent <= progress_percent,
+                )
+            )
+        if current_day is not None:
+            condiciones.append(
+                or_(
+                    SimulationJob.current_day.is_(None),
+                    SimulationJob.current_day <= current_day,
+                )
+            )
+
+        valores: dict[str, Any] = {
+            "heartbeat_at": ahora,
+            "lease_expires_at": ahora + timedelta(seconds=lease_seconds),
+            "updated_at": ahora,
+        }
+        if progress_percent is not None:
+            valores["progress_percent"] = progress_percent
+        if current_day is not None:
+            valores["current_day"] = current_day
+
+        stmt = update(SimulationJob).where(*condiciones).values(**valores)
+        try:
+            resultado = db.execute(stmt, execution_options={"synchronize_session": False})
+            db.commit()
+            if resultado.rowcount != 1:
+                return None
+            return SimulationRepository.obtener_trabajo(db, job_id)
+        except Exception as error:
+            db.rollback()
+            raise RuntimeError(f"Error al registrar heartbeat de {job_id}: {error}") from error
+
+    @staticmethod
+    def registrar_proceso_trabajo(
+        db: Session,
+        job_id: UUID | str,
+        worker_id: str,
+        *,
+        pid: int,
+        pgid: int,
+    ) -> SimulationJob | None:
+        """Registra PID/PGID del proceso del dueño actual del trabajo."""
+        if not worker_id:
+            raise ValueError("worker_id es obligatorio para registrar el proceso")
+        if pid <= 0 or pgid <= 0:
+            raise ValueError("pid y pgid deben ser mayores que 0")
+
+        ahora = datetime.now(timezone.utc)
+        stmt = (
+            update(SimulationJob)
+            .where(
+                SimulationJob.job_id == SimulationRepository._normalizar_job_id(job_id),
+                SimulationJob.estado == "running",
+                SimulationJob.worker_id == worker_id,
+                or_(
+                    SimulationJob.lease_expires_at.is_(None),
+                    SimulationJob.lease_expires_at >= ahora,
+                ),
+            )
+            .values(pid=pid, pgid=pgid, updated_at=ahora)
+        )
+        try:
+            resultado = db.execute(stmt, execution_options={"synchronize_session": False})
+            db.commit()
+            if resultado.rowcount != 1:
+                return None
+            return SimulationRepository.obtener_trabajo(db, job_id)
+        except Exception as error:
+            db.rollback()
+            raise RuntimeError(f"Error al registrar proceso de {job_id}: {error}") from error
+
+    @staticmethod
+    def verificar_propiedad_para_publicacion(
+        db: Session,
+        job_id: UUID | str,
+        worker_id: str,
+    ) -> SimulationJob | None:
+        """Bloquea condicionalmente el trabajo del dueño actual antes de publicar resultados."""
+        if not worker_id:
+            raise ValueError("worker_id es obligatorio para publicar resultados")
+
+        ahora = datetime.now(timezone.utc)
+        stmt = (
+            update(SimulationJob)
+            .where(
+                SimulationJob.job_id == SimulationRepository._normalizar_job_id(job_id),
+                SimulationJob.estado == "running",
+                SimulationJob.worker_id == worker_id,
+                SimulationJob.cancel_requested.is_(False),
+                or_(
+                    SimulationJob.lease_expires_at.is_(None),
+                    SimulationJob.lease_expires_at >= ahora,
+                ),
+            )
+            .values(updated_at=ahora)
+        )
+        resultado = db.execute(stmt, execution_options={"synchronize_session": False})
+        if resultado.rowcount != 1:
+            return None
+        return SimulationRepository.obtener_trabajo(db, job_id)
+
+    @staticmethod
+    def tiene_resultados(db: Session, simulacion_id: str) -> bool:
+        """Indica si la simulación ya tiene resultados persistidos, para no duplicarlos."""
+        stmt = (
+            select(Resultado.id)
+            .where(Resultado.simulacion_id == simulacion_id)
+            .limit(1)
+        )
+        return db.execute(stmt).scalar_one_or_none() is not None
+
+    @staticmethod
+    def solicitar_cancelacion(db: Session, job_id: UUID | str) -> SimulationJob | None:
+        trabajo = SimulationRepository.obtener_trabajo(db, job_id)
+        if trabajo is None or trabajo.estado not in ESTADOS_ACTIVOS_TRABAJO:
+            return None
+        if trabajo.cancel_requested:
+            return trabajo
+
+        stmt = (
+            update(SimulationJob)
+            .where(
+                SimulationJob.job_id == SimulationRepository._normalizar_job_id(job_id),
+                SimulationJob.estado == trabajo.estado,
+                SimulationJob.estado.in_(ESTADOS_ACTIVOS_TRABAJO),
+                SimulationJob.cancel_requested.is_(False),
+            )
+            .values(cancel_requested=True, updated_at=datetime.now(timezone.utc))
+        )
+        try:
+            db.execute(stmt, execution_options={"synchronize_session": False})
+            db.commit()
+            return SimulationRepository.obtener_trabajo(db, job_id)
+        except Exception as error:
+            db.rollback()
+            raise RuntimeError(f"Error al solicitar cancelación de {job_id}: {error}") from error
+
+    @staticmethod
+    def recuperar_trabajo_abandonado(
+        db: Session,
+        job_id: UUID | str,
+        worker_id: str,
+        *,
+        lease_seconds: int = 60,
+        worker_id_anterior: str | None = None,
+    ) -> SimulationJob | None:
+        if not worker_id:
+            raise ValueError("worker_id es obligatorio para recuperar un trabajo")
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds debe ser mayor que 0")
+
+        ahora = datetime.now(timezone.utc)
+        actual = SimulationRepository.obtener_trabajo(db, job_id)
+        if actual is None or actual.estado != "running" or actual.cancel_requested:
+            return None
+        if worker_id_anterior is not None and actual.worker_id != worker_id_anterior:
+            return None
+        lease_actual = SimulationRepository._normalizar_fecha_utc(actual.lease_expires_at)
+        if lease_actual is not None and lease_actual >= ahora:
+            return None
+
+        condiciones = [
+            SimulationJob.job_id == SimulationRepository._normalizar_job_id(job_id),
+            SimulationJob.estado == "running",
+            SimulationJob.cancel_requested.is_(False),
+            or_(
+                SimulationJob.lease_expires_at.is_(None),
+                SimulationJob.lease_expires_at < ahora,
+            ),
+        ]
+        if actual.worker_id is None:
+            condiciones.append(SimulationJob.worker_id.is_(None))
+        else:
+            condiciones.append(SimulationJob.worker_id == actual.worker_id)
+        stmt = (
+            update(SimulationJob)
+            .where(*condiciones)
+            .values(
+                worker_id=worker_id,
+                heartbeat_at=ahora,
+                lease_expires_at=ahora + timedelta(seconds=lease_seconds),
+                started_at=ahora,
+                updated_at=ahora,
+                pid=None,
+                pgid=None,
+                attempt=SimulationJob.attempt + 1,
+            )
+        )
+        try:
+            resultado = db.execute(stmt, execution_options={"synchronize_session": False})
+            db.commit()
+            if resultado.rowcount != 1:
+                return None
+            return SimulationRepository.obtener_trabajo(db, job_id)
+        except Exception as error:
+            db.rollback()
+            raise RuntimeError(f"Error al recuperar trabajo {job_id}: {error}") from error
+
+    @staticmethod
+    def listar_trabajos_pendientes(db: Session, limit: int = 50) -> list[SimulationJob]:
+        if limit <= 0:
+            return []
+
+        stmt = (
+            select(SimulationJob)
+            .where(SimulationJob.estado == "queued")
+            .order_by(SimulationJob.created_at, SimulationJob.job_id)
+            .limit(limit)
+        )
+        if db.bind is not None and db.bind.dialect.name == "postgresql":
+            stmt = stmt.with_for_update(skip_locked=True)
+        return list(db.execute(stmt).scalars().all())
+
+    @staticmethod
+    def listar_trabajos_abandonados(
+        db: Session,
+        *,
+        ahora: datetime | None = None,
+        limit: int = 50,
+    ) -> list[SimulationJob]:
+        if limit <= 0:
+            return []
+
+        referencia = ahora or datetime.now(timezone.utc)
+        stmt = (
+            select(SimulationJob)
+            .where(
+                SimulationJob.estado == "running",
+                or_(
+                    SimulationJob.lease_expires_at.is_(None),
+                    SimulationJob.lease_expires_at < referencia,
+                ),
+            )
+            .order_by(SimulationJob.updated_at, SimulationJob.job_id)
+            .limit(limit)
+        )
+        if db.bind is not None and db.bind.dialect.name == "postgresql":
+            stmt = stmt.with_for_update(skip_locked=True)
+        return list(db.execute(stmt).scalars().all())
 

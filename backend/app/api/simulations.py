@@ -1,32 +1,53 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
 import json
+import logging
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status as http_status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status as http_status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.db.repository import SimulationRepository
 from app.models.evento_ejecucion import EventoEjecucion
 from app.models.simulacion import Simulacion
-from app.services.motor_service import (
-    MotorExecutionError,
-    MotorNotFoundError,
-    MotorOutputError,
-    MotorSecurityError,
-    MotorService,
-    MotorServiceError,
-    MotorTimeoutError,
-    PROJECT_ROOT,
-)
+from app.services.export_service import ExportService
+from app.services.motor_service import MotorSecurityError, MotorService, PROJECT_ROOT
+from app.workers.simulation_worker import MENSAJE_CANCELACION, validar_job_id
 
+
+logger = logging.getLogger("agrochaco.api.jobs")
 
 router = APIRouter(prefix="/api/simulations", tags=["Simulations"])
+jobs_router = APIRouter(prefix="/api/jobs", tags=["Jobs"])
+
+
+def _iso(valor: datetime | None) -> str | None:
+    return valor.isoformat() if valor is not None else None
+
+
+def _formatear_job(trabajo: Any) -> dict[str, Any]:
+    estado = trabajo.estado
+    error = trabajo.error_message
+    return {
+        "job_id": str(trabajo.job_id),
+        "simulation_id": trabajo.simulacion_id,
+        "estado": estado,
+        "status": estado,
+        "progressPercent": trabajo.progress_percent,
+        "currentDay": trabajo.current_day,
+        "pid": trabajo.pid,
+        "cancelRequested": bool(trabajo.cancel_requested),
+        "createdAt": _iso(trabajo.created_at),
+        "startedAt": _iso(trabajo.started_at),
+        "updatedAt": _iso(trabajo.updated_at),
+        "finishedAt": _iso(trabajo.finished_at),
+        "error": error,
+        "error_message": error,
+    }
 
 
 # Tipos permitidos por el formulario de React.
@@ -249,6 +270,67 @@ def _format_simulation_response(sim: Simulacion) -> dict[str, Any]:
     return response_data
 
 
+def _obtener_simulacion_para_exportacion(
+    simulation_id: str, db: Session
+) -> tuple[Simulacion, str]:
+    try:
+        sim_id_seguro = MotorService.validar_simulation_id(simulation_id)
+    except MotorSecurityError as err:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=f"Identificador de simulación inválido: {err}",
+        ) from err
+
+    simulation = SimulationRepository.obtener_por_id(
+        db, sim_id_seguro, cargar_relaciones=True
+    )
+    if simulation is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Simulación no encontrada.",
+        )
+
+    return simulation, sim_id_seguro
+
+
+def _nombre_archivo_exportacion(simulation_id: str, extension: str) -> str:
+    seguro = "".join(
+        ch if ch.isascii() and (ch.isalnum() or ch in "-_") else "_"
+        for ch in simulation_id
+    )
+    return f"{seguro or 'simulacion'}.{extension}"
+
+
+def _respuesta_archivo(contenido: str, media_type: str, nombre_archivo: str) -> Response:
+    return Response(
+        content=contenido.encode("utf-8"),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'},
+    )
+
+
+@router.get("/{simulation_id}/export/json")
+def export_simulation_json(simulation_id: str, db: Session = Depends(get_db)):
+    simulation, sim_id_seguro = _obtener_simulacion_para_exportacion(simulation_id, db)
+    contenido = ExportService.exportar_simulacion_json_str(simulation)
+    return _respuesta_archivo(
+        contenido,
+        "application/json",
+        _nombre_archivo_exportacion(sim_id_seguro, "json"),
+    )
+
+
+@router.get("/{simulation_id}/export/csv")
+def export_simulation_csv(simulation_id: str, db: Session = Depends(get_db)):
+    simulation, sim_id_seguro = _obtener_simulacion_para_exportacion(simulation_id, db)
+    contenido = ExportService.exportar_historial_csv([simulation])
+    return _respuesta_archivo(
+        contenido,
+        "text/csv",
+        _nombre_archivo_exportacion(sim_id_seguro, "csv"),
+    )
+
+
 @router.post("", status_code=http_status.HTTP_201_CREATED)
 def create_simulation(data: SimulationCreate, db: Session = Depends(get_db)):
     simulation_id = f"SIM-{uuid4().hex[:12].upper()}"
@@ -336,9 +418,8 @@ def get_simulation(simulation_id: str, db: Session = Depends(get_db)):
     return _format_simulation_response(simulation)
 
 
-@router.post("/{simulation_id}/execute", status_code=http_status.HTTP_200_OK)
+@router.post("/{simulation_id}/execute", status_code=http_status.HTTP_202_ACCEPTED)
 def execute_simulation(simulation_id: str, db: Session = Depends(get_db)):
-    # 1. Validación de seguridad en simulation_id (prevención de Path Traversal)
     try:
         sim_id_seguro = MotorService.validar_simulation_id(simulation_id)
     except MotorSecurityError as err:
@@ -347,96 +428,69 @@ def execute_simulation(simulation_id: str, db: Session = Depends(get_db)):
             detail=f"Identificador de simulación inválido: {err}",
         ) from err
 
-    # 2. Verificar existencia de la simulación
     simulation = SimulationRepository.obtener_por_id(
         db, sim_id_seguro, cargar_relaciones=True
     )
-
     if simulation is None:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail=f"Simulación '{sim_id_seguro}' no encontrada.",
         )
-
-    # 3. Transición atómica de estado en PostgreSQL:
-    # Bloquea la fila y actualiza solo si estado != 'running'
-    stmt = (
-        update(Simulacion)
-        .where(
-            Simulacion.id == sim_id_seguro,
-            Simulacion.estado != "running",
-        )
-        .values(estado="running")
-    )
-    res = db.execute(stmt)
-
-    if res.rowcount == 0:
-        # Otra solicitud concurrente ya adquirió la ejecución
+    if simulation.estado == "running":
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
-            detail=f"La simulación '{sim_id_seguro}' ya se encuentra en ejecución por otra solicitud.",
+            detail=f"La simulación '{sim_id_seguro}' ya se encuentra en ejecución.",
         )
-
-    # Confirmar de inmediato la transición al estado 'running' y el evento de inicio
-    config_dict: dict[str, Any] = {}
-    if simulation.parametro and isinstance(simulation.parametro.configuracion_json, dict):
-        config_dict = dict(simulation.parametro.configuracion_json)
-
-    engine = str(config_dict.get("engine", "secuencial")).lower()
 
     try:
-        evento_inicio = EventoEjecucion(
-            simulacion_id=sim_id_seguro,
-            nivel="INFO",
-            mensaje=f"Iniciando ejecución del motor '{engine}' en C++17.",
-        )
-        db.add(evento_inicio)
-        db.commit()
-    except Exception as exc:
-        db.rollback()
+        trabajo = SimulationRepository.crear_trabajo_unico(db, sim_id_seguro)
+    except ValueError as error:
         raise HTTPException(
-            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error al registrar inicio de ejecución: {exc}",
-        ) from exc
-
-    # 4. Ejecución del motor C++17
-    try:
-        resultado_ejecucion = MotorService.ejecutar(
-            simulation_id=sim_id_seguro,
-            config_dict=config_dict,
-        )
-
-        # 5. Persistencia atómica de resultados biofísicos y métricas HPC en una sola transacción
-        MotorService.persistir_resultados_en_db(
-            db=db,
-            simulation_id=sim_id_seguro,
-            config_dict=config_dict,
-            resultado_ejecucion=resultado_ejecucion,
-        )
-
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail=str(error),
+        ) from error
     except Exception as error:
-        # En caso de fallo, marcar simulación como 'failed' y registrar evento de error
-        try:
-            SimulationRepository.actualizar_estado(db, sim_id_seguro, "failed")
-            SimulationRepository.registrar_evento(
-                db,
-                sim_id_seguro,
-                nivel="ERROR",
-                mensaje=f"Fallo en la ejecución del motor '{engine}': {error}",
-            )
-        except Exception:
-            pass
-
+        logger.exception("No se pudo crear el trabajo de %s", sim_id_seguro)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error durante la ejecución del motor de simulación: {error}",
+            detail="No se pudo registrar la ejecución solicitada.",
         ) from error
 
-    # 6. Retornar simulación actualizada con sus resultados consolidados
-    sim_actualizada = SimulationRepository.obtener_por_id(
-        db, sim_id_seguro, cargar_relaciones=True
-    )
-    return _format_simulation_response(sim_actualizada or simulation)
+    if trabajo is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=f"La simulación '{sim_id_seguro}' ya tiene un trabajo activo.",
+        )
+
+    try:
+        SimulationRepository.actualizar_estado_simulacion(
+            db, sim_id_seguro, "running", commit=False
+        )
+        db.add(
+            EventoEjecucion(
+                simulacion_id=sim_id_seguro,
+                nivel="INFO",
+                mensaje="Ejecución encolada; esperando a un worker.",
+            )
+        )
+        db.commit()
+    except Exception as error:
+        db.rollback()
+        logger.exception("No se pudo registrar el encolado de %s", sim_id_seguro)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No se pudo registrar la ejecución solicitada.",
+        ) from error
+
+    return {
+        "job_id": str(trabajo.job_id),
+        "simulation_id": sim_id_seguro,
+        "estado": trabajo.estado,
+        "status": trabajo.estado,
+        "progressPercent": trabajo.progress_percent,
+        "currentDay": trabajo.current_day,
+        "createdAt": trabajo.created_at.isoformat() if trabajo.created_at else None,
+    }
 
 
 @router.delete("/{simulation_id}")
@@ -461,3 +515,83 @@ def delete_simulation(simulation_id: str, db: Session = Depends(get_db)):
         "mensaje": "Simulación eliminada correctamente.",
         "id": sim_id_seguro,
     }
+
+
+@jobs_router.get("/{job_id}")
+def get_job(job_id: str, db: Session = Depends(get_db)):
+    try:
+        job_uuid = validar_job_id(job_id)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="Identificador de trabajo inválido.",
+        ) from error
+
+    db.rollback()
+    trabajo = SimulationRepository.obtener_trabajo(db, job_uuid)
+    if trabajo is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Trabajo no encontrado.",
+        )
+    return _formatear_job(trabajo)
+
+
+@jobs_router.post("/{job_id}/cancel")
+def cancel_job(job_id: str, db: Session = Depends(get_db)):
+    try:
+        job_uuid = validar_job_id(job_id)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="Identificador de trabajo inválido.",
+        ) from error
+
+    db.rollback()
+    trabajo = SimulationRepository.obtener_trabajo(db, job_uuid)
+    if trabajo is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Trabajo no encontrado.",
+        )
+
+    try:
+        actualizado = SimulationRepository.solicitar_cancelacion(db, job_uuid)
+    except Exception as error:
+        logger.exception("No se pudo solicitar la cancelación de %s", job_uuid)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No se pudo solicitar la cancelación.",
+        ) from error
+
+    if actualizado is None:
+        db.rollback()
+        actual = SimulationRepository.obtener_trabajo(db, job_uuid)
+        estado = actual.estado if actual is not None else "desconocido"
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=f"El trabajo ya no puede cancelarse; estado actual: {estado}.",
+        )
+
+    if actualizado.estado == "queued":
+        try:
+            cancelado = SimulationRepository.actualizar_estado_trabajo(
+                db,
+                job_uuid,
+                "canceled",
+                estado_esperado="queued",
+                error_message=MENSAJE_CANCELACION,
+                commit=False,
+            )
+            if cancelado is not None:
+                SimulationRepository.actualizar_estado_simulacion(
+                    db, cancelado.simulacion_id, "paused", commit=False
+                )
+                db.commit()
+                actualizado = cancelado
+        except Exception:
+            db.rollback()
+            logger.exception("No se pudo consolidar la cancelación de %s", job_uuid)
+            actualizado = SimulationRepository.obtener_trabajo(db, job_uuid) or actualizado
+
+    return _formatear_job(actualizado)

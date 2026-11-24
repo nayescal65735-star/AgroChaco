@@ -1,12 +1,13 @@
 """Módulo de modelos SQLAlchemy para AgroChaco.
 
-Exporta los seis modelos de dominio biofísico, parámetros y ejecución:
+Exporta los modelos de dominio biofísico, parámetros, ejecución y trabajos:
 - Simulacion
 - Parametro
 - Resultado
 - Rendimiento
 - FuenteDatos
 - EventoEjecucion
+- SimulationJob
 """
 
 from app.db.database import Base
@@ -16,6 +17,7 @@ from app.models.parametro import Parametro
 from app.models.rendimiento import Rendimiento
 from app.models.resultado import Resultado
 from app.models.simulacion import Simulacion
+from app.models.simulation_job import SimulationJob
 
 __all__ = [
     "Base",
@@ -25,5 +27,6 @@ __all__ = [
     "Rendimiento",
     "FuenteDatos",
     "EventoEjecucion",
+    "SimulationJob",
 ]
 

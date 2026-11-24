@@ -5,6 +5,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     ForeignKey,
+    Integer,
     Numeric,
     String,
 )
@@ -20,7 +21,11 @@ class Parametro(Base):
 
     __tablename__ = "parametros"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
     simulacion_id = Column(
         String(36),
         ForeignKey("simulaciones.id", ondelete="CASCADE"),

@@ -166,7 +166,9 @@ export function History() {
               <option value="completed">Completadas</option>
               <option value="running">En ejecución</option>
               <option value="pending">En cola</option>
+              <option value="queued">Trabajo en cola</option>
               <option value="paused">Pausadas</option>
+              <option value="canceled">Canceladas</option>
               <option value="failed">Fallidas</option>
             </select>
           </div>

@@ -1,4 +1,4 @@
-import { CheckCircle2, Clock, PlayCircle, XCircle, PauseCircle } from 'lucide-react';
+import { Ban, CheckCircle2, Clock, PlayCircle, XCircle, PauseCircle } from 'lucide-react';
 import type { SimulationStatus } from '../../types';
 
 interface StatusBadgeProps {
@@ -22,8 +22,9 @@ export function StatusBadge({ status }: StatusBadgeProps) {
         </span>
       );
     case 'pending':
+    case 'queued':
       return (
-        <span className="badge badge-pending">
+        <span className="badge badge-queued">
           <Clock size={12} />
           En cola
         </span>
@@ -33,6 +34,13 @@ export function StatusBadge({ status }: StatusBadgeProps) {
         <span className="badge badge-paused">
           <PauseCircle size={12} />
           Pausada
+        </span>
+      );
+    case 'canceled':
+      return (
+        <span className="badge badge-canceled">
+          <Ban size={12} />
+          Cancelada
         </span>
       );
     case 'failed':

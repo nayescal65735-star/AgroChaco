@@ -379,6 +379,7 @@ class MotorService:
         simulation_id: str,
         config_dict: dict[str, Any],
         resultado_ejecucion: dict[str, Any],
+        commit: bool = True,
     ) -> None:
         """Persiste atómicamente métricas biofísicas, HPC, nuevo estado y evento en PostgreSQL.
 
@@ -498,4 +499,5 @@ class MotorService:
             datos_rendimiento=datos_rendimiento,
             nuevo_estado="completed",
             mensaje_evento=mensaje_evento,
+            commit=commit,
         )
