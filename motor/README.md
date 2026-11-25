@@ -47,16 +47,27 @@ Para cada celda de la parcela en el paso diario $t$, con profundidad radicular $
    0.0 & \text{si } \theta \le PMP 
    \end{cases}$$
 
-### 2.3. Modelo de Rendimiento de Cultivo (FAO-33 Stewart-Doorenbos)
-La reducción en el rendimiento potencial se calcula mediante la **formulación aditiva por etapas fenológicas de FAO-33** (Doorenbos & Kassam 1979, ecuación 2), eliminando ponderaciones heurísticas y preservando la magnitud de $K_y > 1$:
-$$1 - \frac{Y_a}{Y_m} = \left[ \sum_{i=1}^{n} K_{y, i} \times \left(1 - \frac{ET_{a, i}}{ET_{c, i}}\right) \times \frac{ET_{c, i}}{ET_{c, total}} \right] \times Factor_{variedad}$$
+### 2.3. Modelo de Rendimiento de Cultivo (respuesta aditiva ponderada)
+La reducción del rendimiento potencial se calcula con la relación de respuesta del rendimiento al agua en su forma aditiva ponderada por demanda:
+$$1 - \frac{Y_a}{Y_m} = \sum_{i=1}^{n} K_{y, i} \times \left(1 - \frac{ET_{a, i}}{ET_{c, i}}\right) \times \frac{ET_{c, i}}{ET_{c, total}}$$
 
-- **Sensibilidad por etapa ($K_{y, i}$ para maíz):**
-  - Vegetativo (V3 - V12): $K_y = 0.40$
+La fórmula corresponde a la formulación documentada previamente en el motor e inspirada en FAO-33 (Doorenbos & Kassam 1979, ecuación 2). El peso $ET_{c,i}/ET_{c,total}$ es la fracción de demanda potencial ocurrida en cada etapa; por tanto, refleja de forma coherente la duración fenológica y el valor de $K_c$ de esa etapa. **No constituye una calibración experimental del maíz del Gran Chaco.**
+
+Protecciones numéricas aplicadas en `motor/src/crop_model.cpp`:
+- Si $ET_{c,total} \le 0.001$ mm, la pérdida es $0\%$.
+- Las etapas con $ET_{c,i} \le 0.001$ mm se omiten y no producen divisiones inválidas.
+- $ET_{a,i}$ se acota a $[0, ET_{c,i}]$ y el déficit resultante a $[0,1]$.
+- No se aplica un producto de factores por etapa ni un ajuste que fuerce un factor negativo a cero; la respuesta es continua dentro del rango físico.
+- El resultado final se acota a $[0.0, 100.0]\%$ como límite físico.
+
+- **Sensibilidad por etapa ($K_{y, i}$ para maíz), valores existentes en `agronomic_data.cpp`:**
+  - Emergencia (VE - V2): $K_y = 0.20$
+  - Desarrollo Vegetativo (V6 - V12): $K_y = 0.40$
   - Floración y Polinización (R1): $K_y = 1.25$ (**Etapa Crítica**, mayor penalización)
   - Llenado de Grano (R2 - R4): $K_y = 0.50$
-  - Maduración (R5 - R6): $K_y = 0.20$
-- **Límite físico:** La pérdida de rendimiento se acota estrictamente en el intervalo $[0.0, 100.0]\%$.
+  - Maduración Fisiológica (R6): $K_y = 0.20$
+
+- **Factor varietal:** Los multiplicadores anteriores $0.85$, $0.95$ y $1.05$ se eliminaron de la ecuación porque eran heurísticos y no estaban calibrados. La variedad sigue influyendo en la simulación mediante la duración del ciclo y el rendimiento potencial, pero no modifica la pérdida calculada por la relación de respuesta al agua.
 
 ---
 
@@ -66,7 +77,9 @@ $$1 - \frac{Y_a}{Y_m} = \left[ \sum_{i=1}^{n} K_{y, i} \times \left(1 - \frac{ET
 | :--- | :--- | :--- |
 | **Configurados por el usuario** | `rows`, `cols`, `cellSizeMeters`, `simulationDays`, `initialMoisturePercent`, `droughtScenario`, `zone`, `soilType`, `cornVariety` | Entradas de la simulación validadas por `ConfigValidator`. |
 | **Datos de referencia científica** | - Coeficientes $K_c$ por etapa (FAO-56: 0.40 a 1.20)<br>- Coeficientes $K_y$ por etapa (FAO-33: 0.20 a 1.25)<br>- Coordenadas, lluvia anual y temperatura media de zonas chaqueñas | Literatura agronómica estándar FAO y estaciones meteorológicas de referencia (SENAMHI / INIAF). |
-| **Supuestos de modelación** | - Modelo de balance de cubo mono-capa (*single-layer bucket model*)<br>- Precipitación uniforme sobre la parcela sin transporte lateral<br>- Factor de rusticidad varietal ($0.85$ Criollo, $0.95$ INIAF, $1.05$ Dekalb) | Simplificaciones de cómputo para simulación distribuida. No calibradas en parcelas experimentales. |
+| **Supuestos de modelación** | - Modelo de balance de cubo mono-capa (*single-layer bucket model*)<br>- Precipitación uniforme sobre la parcela sin transporte lateral | Simplificaciones de cómputo para simulación distribuida. No calibradas en parcelas experimentales. |
+
+Los factores de rusticidad varietal $0.85$, $0.95$ y $1.05$ ya no se aplican a la pérdida de rendimiento: no estaban calibrados y su inclusión mezclaba un supuesto comparativo con la ecuación de respuesta al agua. La variedad continúa determinando el ciclo fenológico y el rendimiento potencial.
 
 > [!WARNING]
 > **Aviso de Integridad Científica:**  
@@ -147,9 +160,9 @@ También se puede utilizar CTest:
 
     ctest --test-dir build --output-on-failure
 
-La suite contiene ocho pruebas: validación de parámetros, conservación de masa de agua, día sin precipitación, lluvia extrema, ETc igual a cero, sequía prolongada, cálculo FAO-33 y reproducibilidad secuencial.
+La suite contiene doce pruebas: validación de parámetros, conservación de masa de agua, día sin precipitación, lluvia extrema, ETc igual a cero, sequía prolongada, cálculo de pérdida aditiva ponderada, reproducibilidad secuencial, serialización de métricas opcionales, ausencia de speedup ficticio en motores paralelos, estabilidad numérica de la ecuación de pérdida e independencia respecto del factor varietal.
 
-**Resultado registrado:** 8/8 pruebas aprobadas y CTest con 100 % de éxito.
+**Resultado registrado:** 12/12 pruebas aprobadas y CTest con 100 % de éxito.
 
 ---
 
@@ -204,6 +217,9 @@ Los resultados corresponden a las condiciones de esta prueba y no son universale
 ## 8. Verificación de Resultados Agronómicos
 
 Los cinco indicadores se mantuvieron consistentes en las cinco ejecuciones medidas de cada motor.
+
+> [!WARNING]
+> **Resultados históricos:** los valores de pérdida de rendimiento y rendimiento estimado de esta tabla fueron generados con la formulación anterior del modelo (producto de factores con multiplicador varietal y clamping intermedio). Se conservan únicamente como registro de rendimiento y comparación entre motores; **no deben interpretarse como estimaciones agronómicas válidas**. La corrección de la ecuación no regenera ni modifica estos archivos.
 
 | Indicador | Secuencial | OpenMP | MPI | Híbrido |
 |---|---:|---:|---:|---:|

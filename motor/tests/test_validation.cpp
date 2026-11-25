@@ -16,7 +16,7 @@ using namespace agrochaco;
 
 // 1. Validación de rechazo de parámetros inválidos
 void testValidationRejectsInvalidParameters() {
-    std::cout << "[TEST 1/10] Ejecutando: testValidationRejectsInvalidParameters...\n";
+    std::cout << "[TEST 1/12] Ejecutando: testValidationRejectsInvalidParameters...\n";
 
     SimulationConfig cfg = ConfigLoader::createDefault();
     std::vector<std::string> errors;
@@ -58,7 +58,7 @@ void testValidationRejectsInvalidParameters() {
 
 // 2. Conservación estricta de masa de agua (Celda y Malla 2D)
 void testWaterMassConservation() {
-    std::cout << "[TEST 2/10] Ejecutando: testWaterMassConservation...\n";
+    std::cout << "[TEST 2/12] Ejecutando: testWaterMassConservation...\n";
 
     const auto& soil = AgronomicData::getSoil(SoilType::FRANCO_ARENOSO);
 
@@ -87,7 +87,7 @@ void testWaterMassConservation() {
 
 // 3. Día sin precipitación
 void testNoPrecipitationDay() {
-    std::cout << "[TEST 3/10] Ejecutando: testNoPrecipitationDay...\n";
+    std::cout << "[TEST 3/12] Ejecutando: testNoPrecipitationDay...\n";
 
     const auto& soil = AgronomicData::getSoil(SoilType::FRANCO_ARCILLOSO);
     double initMoist = 25.0; // Entre WP (17.5) y FC (31.0)
@@ -109,7 +109,7 @@ void testNoPrecipitationDay() {
 
 // 4. Lluvia extrema y saturación (Drenaje de exceso)
 void testExtremeRainfall() {
-    std::cout << "[TEST 4/10] Ejecutando: testExtremeRainfall...\n";
+    std::cout << "[TEST 4/12] Ejecutando: testExtremeRainfall...\n";
 
     const auto& soil = AgronomicData::getSoil(SoilType::ARENOSO); // FC=12.0%, WP=4.8%
     double initMoist = 10.0;
@@ -134,7 +134,7 @@ void testExtremeRainfall() {
 
 // 5. Demanda ETc igual a cero (Evitar división por cero y NaN)
 void testZeroEtcHandling() {
-    std::cout << "[TEST 5/10] Ejecutando: testZeroEtcHandling...\n";
+    std::cout << "[TEST 5/12] Ejecutando: testZeroEtcHandling...\n";
 
     const auto& soil = AgronomicData::getSoil(SoilType::FRANCO);
 
@@ -156,7 +156,7 @@ void testZeroEtcHandling() {
 
 // 6. Sequía prolongada y convergencia hacia el PMP
 void testProlongedDroughtAndPmpConvergence() {
-    std::cout << "[TEST 6/10] Ejecutando: testProlongedDroughtAndPmpConvergence...\n";
+    std::cout << "[TEST 6/12] Ejecutando: testProlongedDroughtAndPmpConvergence...\n";
 
     const auto& soil = AgronomicData::getSoil(SoilType::ARENOSO); // FC=12.0%, WP=4.8%
     double moisture = soil.fieldCapacity;
@@ -181,46 +181,43 @@ void testProlongedDroughtAndPmpConvergence() {
     std::cout << "  -> PASÓ: Sequía continua de 100 días converge asintóticamente a PMP con CWSI = 1.0.\n";
 }
 
-// 7. Modelo de Rendimiento FAO-33 (Sensibilidad por etapas)
+// 7. Modelo aditivo ponderado de pérdida de rendimiento
 void testFao33YieldLossCalculation() {
-    std::cout << "[TEST 7/10] Ejecutando: testFao33YieldLossCalculation...\n";
+    std::cout << "[TEST 7/12] Ejecutando: testFao33YieldLossCalculation...\n";
 
     const auto& variety = AgronomicData::getCornVariety(CornVarietyId::CHACO_01_CRIOLLO);
 
-    // Caso A: Sin déficit (ETa == ETc en todas las etapas) -> Pérdida = 0%
     std::vector<double> stageEtc = {30.0, 100.0, 150.0, 120.0, 50.0};
     std::vector<double> stageEtaFull = stageEtc;
     std::vector<double> stageKy  = {0.20,  0.40,  1.25,  0.50,  0.20};
 
     double lossZero = CropModel::calculateYieldLoss(stageEtc, stageEtaFull, stageKy, variety);
-    assert(std::abs(lossZero - 0.0) < 1e-9);
+    assert(std::abs(lossZero) < 1e-9);
 
-    // Caso B: Déficit idéntico del 40% en Floración (R1, Ky=1.25) vs Maduración (R6, Ky=0.20)
     std::vector<double> etaStressFlowering = stageEtc;
-    etaStressFlowering[2] = stageEtc[2] * 0.60; // 40% déficit en floración
+    etaStressFlowering[2] = stageEtc[2] * 0.60;
 
     std::vector<double> etaStressMaturation = stageEtc;
-    etaStressMaturation[4] = stageEtc[4] * 0.60; // 40% déficit en maduración
+    etaStressMaturation[4] = stageEtc[4] * 0.60;
 
     double lossFlowering = CropModel::calculateYieldLoss(stageEtc, etaStressFlowering, stageKy, variety);
     double lossMaturation = CropModel::calculateYieldLoss(stageEtc, etaStressMaturation, stageKy, variety);
 
-    // El estrés en floración debe provocar un daño significativamente mayor
-    assert(lossFlowering > lossMaturation * 3.0);
-    assert(lossFlowering <= 100.0);
-    assert(lossMaturation >= 0.0);
+    assert(std::abs(lossFlowering - 16.6667) < 0.01);
+    assert(std::abs(lossMaturation - 0.8889) < 0.01);
+    assert(lossFlowering > lossMaturation * 10.0);
 
-    // Caso C: Sequía total (ETa = 0 en todo el ciclo)
     std::vector<double> etaZero = {0.0, 0.0, 0.0, 0.0, 0.0};
     double lossMax = CropModel::calculateYieldLoss(stageEtc, etaZero, stageKy, variety);
-    assert(lossMax >= 80.0 && lossMax <= 100.0);
+    assert(std::abs(lossMax - 67.4444) < 0.01);
+    assert(lossMax < 100.0);
 
-    std::cout << "  -> PASÓ: Modelo FAO-33 penaliza con máxima severidad el déficit en floración R1.\n";
+    std::cout << "  -> PASÓ: La pérdida es aditiva, ponderada por ETc y continua en todo el rango.\n";
 }
 
 // 8. Reproducibilidad y determinismo de la simulación secuencial
 void testSequentialEngineReproducibility() {
-    std::cout << "[TEST 8/10] Ejecutando: testSequentialEngineReproducibility...\n";
+    std::cout << "[TEST 8/12] Ejecutando: testSequentialEngineReproducibility...\n";
 
     SimulationConfig cfg = ConfigLoader::createDefault();
     cfg.gridConfig.rows = 15;
@@ -251,7 +248,7 @@ void testSequentialEngineReproducibility() {
 }
 
 void testOptionalMetricsSerialization() {
-    std::cout << "[TEST 9/10] Ejecutando: testOptionalMetricsSerialization...\n";
+    std::cout << "[TEST 9/12] Ejecutando: testOptionalMetricsSerialization...\n";
 
     SimulationResult result;
     result.executionTimeSeconds = 0.123;
@@ -273,7 +270,7 @@ void testOptionalMetricsSerialization() {
 }
 
 void testParallelEnginesDoNotReportFictitiousSpeedup() {
-    std::cout << "[TEST 10/10] Ejecutando: testParallelEnginesDoNotReportFictitiousSpeedup...\n";
+    std::cout << "[TEST 10/12] Ejecutando: testParallelEnginesDoNotReportFictitiousSpeedup...\n";
 
     SimulationConfig cfg = ConfigLoader::createDefault();
     cfg.gridConfig.rows = 8;
@@ -307,6 +304,58 @@ void testParallelEnginesDoNotReportFictitiousSpeedup() {
     std::cout << "  -> PASÓ: motores paralelos registran tiempo real y métricas no disponibles.\n";
 }
 
+void testYieldLossNumericalStability() {
+    std::cout << "[TEST 11/12] Ejecutando: testYieldLossNumericalStability...\n";
+
+    const auto& variety = AgronomicData::getCornVariety(CornVarietyId::CHACO_01_CRIOLLO);
+    std::vector<double> stageKy = {0.20, 0.40, 1.25, 0.50, 0.20};
+
+    std::vector<double> zeroEtc(5, 0.0);
+    assert(CropModel::calculateYieldLoss(zeroEtc, zeroEtc, stageKy, variety) == 0.0);
+
+    std::vector<double> stageEtc = {0.0, 100.0, 150.0, 120.0, 50.0};
+    std::vector<double> etaNoStress = stageEtc;
+    assert(std::abs(CropModel::calculateYieldLoss(stageEtc, etaNoStress, stageKy, variety)) < 1e-9);
+
+    std::vector<double> etaExcess = etaNoStress;
+    etaExcess[2] = stageEtc[2] * 1.5;
+    assert(std::abs(CropModel::calculateYieldLoss(stageEtc, etaExcess, stageKy, variety)) < 1e-9);
+
+    std::vector<double> etaBefore = etaNoStress;
+    etaBefore[2] = stageEtc[2] * 0.21;
+    std::vector<double> etaAfter = etaNoStress;
+    etaAfter[2] = stageEtc[2] * 0.19;
+
+    double lossBefore = CropModel::calculateYieldLoss(stageEtc, etaBefore, stageKy, variety);
+    double lossAfter = CropModel::calculateYieldLoss(stageEtc, etaAfter, stageKy, variety);
+    double expectedDelta = 1.25 * 0.02 * (150.0 / 420.0) * 100.0;
+
+    assert(lossAfter > lossBefore);
+    assert(std::abs((lossAfter - lossBefore) - expectedDelta) < 1e-6);
+
+    std::cout << "  -> PASÓ: denominadores protegidos, ETa acotada y respuesta continua sin saltos.\n";
+}
+
+void testVarietyDoesNotAlterScientificLoss() {
+    std::cout << "[TEST 12/12] Ejecutando: testVarietyDoesNotAlterScientificLoss...\n";
+
+    const auto& criollo = AgronomicData::getCornVariety(CornVarietyId::CHACO_01_CRIOLLO);
+    const auto& dekalb = AgronomicData::getCornVariety(CornVarietyId::DEKALB_7088);
+
+    std::vector<double> stageEtc = {30.0, 100.0, 150.0, 120.0, 50.0};
+    std::vector<double> stageEta = stageEtc;
+    stageEta[2] *= 0.60;
+    std::vector<double> stageKy = {0.20, 0.40, 1.25, 0.50, 0.20};
+
+    double lossCriollo = CropModel::calculateYieldLoss(stageEtc, stageEta, stageKy, criollo);
+    double lossDekalb = CropModel::calculateYieldLoss(stageEtc, stageEta, stageKy, dekalb);
+
+    assert(std::abs(lossCriollo - lossDekalb) < 1e-12);
+    assert(std::abs(lossCriollo - 16.6667) < 0.01);
+
+    std::cout << "  -> PASÓ: la ecuación científica no depende del multiplicador varietal heurístico.\n";
+}
+
 int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
 
@@ -324,8 +373,10 @@ int main(int argc, char** argv) {
     testSequentialEngineReproducibility();
     testOptionalMetricsSerialization();
     testParallelEnginesDoNotReportFictitiousSpeedup();
+    testYieldLossNumericalStability();
+    testVarietyDoesNotAlterScientificLoss();
 
-    std::cout << "\n[OK] TODAS LAS PRUEBAS UNITARIAS Y FÍSICAS PASARON CON ÉXITO (10/10)\n\n";
+    std::cout << "\n[OK] TODAS LAS PRUEBAS UNITARIAS Y FÍSICAS PASARON CON ÉXITO (12/12)\n\n";
     MPI_Finalize();
     return 0;
 }
