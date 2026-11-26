@@ -1,8 +1,12 @@
 #include "agrochaco/json_serializer.hpp"
+#include "agrochaco/agronomic_data.hpp"
 #include <fstream>
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <unistd.h>
 #include <cctype>
 
 namespace agrochaco {
@@ -13,6 +17,79 @@ static void writeOptionalMetric(std::ostringstream& ss, const std::optional<doub
     } else {
         ss << "null";
     }
+}
+
+static void writeDiagnosticNumber(std::ostringstream& ss, double value) {
+    if (!std::isfinite(value)) {
+        ss << "null";
+    } else {
+        ss << std::scientific << std::setprecision(12) << value;
+    }
+}
+
+static void writeOptionalNumber(std::ostringstream& ss, const std::optional<double>& value) {
+    if (value.has_value() && std::isfinite(value.value())) {
+        ss << std::scientific << std::setprecision(12) << value.value();
+    } else {
+        ss << "null";
+    }
+}
+
+static void writeWaterBalance(std::ostringstream& ss, const WaterBalanceData& data) {
+    ss << "{"
+       << "\"precipitationMm\": ";
+    writeDiagnosticNumber(ss, data.precipitationMm);
+    ss << ", \"etcMm\": ";
+    writeDiagnosticNumber(ss, data.etcMm);
+    ss << ", \"etaMm\": ";
+    writeDiagnosticNumber(ss, data.etaMm);
+    ss << ", \"deepDrainageMm\": ";
+    writeDiagnosticNumber(ss, data.deepDrainageMm);
+    ss << ", \"surfaceRunoffMm\": ";
+    writeOptionalNumber(ss, data.surfaceRunoffMm);
+    ss << ", \"storageInitialMm\": ";
+    writeDiagnosticNumber(ss, data.storageInitialMm);
+    ss << ", \"storageFinalMm\": ";
+    writeDiagnosticNumber(ss, data.storageFinalMm);
+    ss << ", \"storageChangeMm\": ";
+    writeDiagnosticNumber(ss, data.storageChangeMm);
+    ss << ", \"balanceErrorMm\": ";
+    writeDiagnosticNumber(ss, data.balanceErrorMm);
+    ss << ", \"balanceResidualMm\": ";
+    writeDiagnosticNumber(ss, data.balanceResidualMm);
+    ss << ", \"rootDepthMm\": ";
+    writeDiagnosticNumber(ss, data.rootDepthMm);
+    ss << ", \"rootDepthStorageRebaseMm\": ";
+    writeDiagnosticNumber(ss, data.rootDepthStorageRebaseMm);
+    ss << "}";
+}
+
+static void writeWaterBalanceSummary(std::ostringstream& ss, const WaterBalanceSummary& summary, const std::string& indent) {
+    (void)indent;
+    ss << "{"
+       << "\"precipitationTotalMm\": ";
+    writeDiagnosticNumber(ss, summary.precipitationTotalMm);
+    ss << ", \"etcTotalMm\": ";
+    writeDiagnosticNumber(ss, summary.etcTotalMm);
+    ss << ", \"etaTotalMm\": ";
+    writeDiagnosticNumber(ss, summary.etaTotalMm);
+    ss << ", \"deepDrainageTotalMm\": ";
+    writeDiagnosticNumber(ss, summary.deepDrainageTotalMm);
+    ss << ", \"surfaceRunoffTotalMm\": ";
+    writeOptionalNumber(ss, summary.surfaceRunoffTotalMm);
+    ss << ", \"storageInitialMm\": ";
+    writeDiagnosticNumber(ss, summary.storageInitialMm);
+    ss << ", \"storageFinalMm\": ";
+    writeDiagnosticNumber(ss, summary.storageFinalMm);
+    ss << ", \"storageChangeMm\": ";
+    writeDiagnosticNumber(ss, summary.storageChangeMm);
+    ss << ", \"maxDailyBalanceErrorMm\": ";
+    writeDiagnosticNumber(ss, summary.maxDailyBalanceErrorMm);
+    ss << ", \"massBalanceResidualMm\": ";
+    writeDiagnosticNumber(ss, summary.massBalanceResidualMm);
+    ss << ", \"rootDepthStorageRebaseTotalMm\": ";
+    writeDiagnosticNumber(ss, summary.rootDepthStorageRebaseTotalMm);
+    ss << "}";
 }
 
 static std::string escapeJson(const std::string& s) {
@@ -35,6 +112,40 @@ static std::string escapeJson(const std::string& s) {
         }
     }
     return o.str();
+}
+
+std::string JsonSerializer::serializeConfig(const SimulationConfig& config) {
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(12)
+       << "{"
+       << "\"id\": \"" << escapeJson(config.id) << "\","
+       << "\"name\": \"" << escapeJson(config.name) << "\","
+       << "\"description\": \"" << escapeJson(config.description) << "\","
+       << "\"zone\": \"" << zoneToString(config.zone) << "\","
+       << "\"zoneName\": \"" << escapeJson(config.zoneName) << "\","
+       << "\"department\": \"" << escapeJson(config.department) << "\","
+       << "\"soilType\": \"" << soilToString(config.soilType) << "\","
+       << "\"cornVariety\": \"" << varietyToString(config.cornVariety) << "\","
+       << "\"plantingDate\": \"" << escapeJson(config.plantingDate) << "\","
+       << "\"simulationDays\": " << config.simulationDays << ","
+       << "\"gridConfig\": {"
+       << "\"rows\": " << config.gridConfig.rows << ","
+       << "\"cols\": " << config.gridConfig.cols << ","
+       << "\"cellSizeMeters\": " << config.gridConfig.cellSizeMeters << "},"
+       << "\"initialMoisturePercent\": " << config.initialMoisturePercent << ","
+       << "\"droughtScenario\": \"" << scenarioToString(config.droughtScenario) << "\","
+       << "\"engine\": \"" << engineToString(config.engine) << "\"";
+    if (config.openmpThreads.has_value()) {
+        ss << ",\"openmpThreads\": " << config.openmpThreads.value();
+    }
+    if (config.mpiProcesses.has_value()) {
+        ss << ",\"mpiProcesses\": " << config.mpiProcesses.value();
+    }
+    if (config.nodesCount.has_value()) {
+        ss << ",\"nodesCount\": " << config.nodesCount.value();
+    }
+    ss << ",\"createdAt\": \"" << escapeJson(config.createdAt) << "\"}";
+    return ss.str();
 }
 
 std::string JsonSerializer::serializeResult(const SimulationResult& result, bool pretty) {
@@ -100,6 +211,14 @@ std::string JsonSerializer::serializeResult(const SimulationResult& result, bool
     ss << indent << "\"nominalYieldTnHa\": " << result.nominalYieldTnHa << "," << nl;
     ss << indent << "\"waterDeficitMm\": " << result.waterDeficitMm << "," << nl;
     ss << indent << "\"memoryUsageMb\": " << result.memoryUsageMb << "," << nl;
+    ss << indent << "\"waterBalanceSummary\": ";
+    if (result.waterBalanceSummary.has_value()) {
+        writeWaterBalanceSummary(ss, result.waterBalanceSummary.value(), indent);
+    } else {
+        ss << "null";
+    }
+    ss << "," << nl;
+    ss << std::fixed << std::setprecision(3);
 
     // Timeline array
     ss << indent << "\"timelineData\": [" << nl;
@@ -113,7 +232,14 @@ std::string JsonSerializer::serializeResult(const SimulationResult& result, bool
            << "\"etPotential\": " << pt.etPotential << ", "
            << "\"cwsi\": " << pt.cwsi << ", "
            << "\"soilMoisture\": " << pt.soilMoisture << ", "
-           << "\"precipitation\": " << pt.precipitation << "}";
+           << "\"precipitation\": " << pt.precipitation << ", "
+           << "\"waterBalance\": ";
+        if (pt.waterBalance.has_value()) {
+            writeWaterBalance(ss, pt.waterBalance.value());
+        } else {
+            ss << "null";
+        }
+        ss << std::fixed << std::setprecision(3) << "}";
         if (i + 1 < result.timelineData.size()) ss << ",";
         ss << nl;
     }
@@ -151,18 +277,36 @@ std::string JsonSerializer::serializeResult(const SimulationResult& result, bool
     return ss.str();
 }
 
-bool JsonSerializer::saveResultToFile(const SimulationResult& result, const std::string& filePath) {
-    std::ofstream file(filePath);
+static bool writeAtomically(const std::string& filePath, const std::string& content) {
+    const std::string tempPath = filePath + ".tmp." + std::to_string(::getpid());
+    std::ofstream file(tempPath, std::ios::trunc);
     if (!file.is_open()) return false;
-    file << serializeResult(result, true);
-    return file.good();
+    file << content;
+    file.flush();
+    const bool ok = file.good();
+    file.close();
+    if (!ok) {
+        std::remove(tempPath.c_str());
+        return false;
+    }
+    if (std::rename(tempPath.c_str(), filePath.c_str()) != 0) {
+        std::remove(tempPath.c_str());
+        return false;
+    }
+    return true;
+}
+
+bool JsonSerializer::saveResultToFile(const SimulationResult& result, const std::string& filePath) {
+    return writeAtomically(filePath, serializeResult(result, true));
 }
 
 bool JsonSerializer::exportTimelineToCsv(const SimulationResult& result, const std::string& filePath) {
-    std::ofstream file(filePath);
-    if (!file.is_open()) return false;
+    std::ostringstream file;
 
-    file << "Dia,Etapa,ET_Actual_mm,ET_Potencial_mm,CWSI,Humedad_Suelo_Porc,Precipitacion_mm\n";
+    file << "Dia,Etapa,ET_Actual_mm,ET_Potencial_mm,CWSI,Humedad_Suelo_Porc,Precipitacion_mm,"
+         << "Drenaje_Profundo_mm,Escorrentia_Superficial_mm,Almacenamiento_Inicial_mm,"
+         << "Almacenamiento_Final_mm,Delta_Almacenamiento_mm,Error_Balance_mm,"
+         << "Profundidad_Radicular_mm,Rebase_Profundidad_mm,Residuo_Balance_mm\n";
     for (const auto& row : result.timelineData) {
         file << row.day << ",\""
              << row.phenologicalStage << "\","
@@ -173,9 +317,30 @@ bool JsonSerializer::exportTimelineToCsv(const SimulationResult& result, const s
              << row.cwsi << ","
              << std::setprecision(1)
              << row.soilMoisture << ","
-             << row.precipitation << "\n";
+             << row.precipitation << ",";
+        if (row.waterBalance.has_value()) {
+            const auto& balance = row.waterBalance.value();
+            file << std::scientific << std::setprecision(12)
+                 << balance.deepDrainageMm << ",";
+            if (balance.surfaceRunoffMm.has_value() && std::isfinite(balance.surfaceRunoffMm.value())) {
+                file << balance.surfaceRunoffMm.value();
+            }
+            file << ","
+                 << balance.storageInitialMm << ","
+                 << balance.storageFinalMm << ","
+                 << balance.storageChangeMm << ","
+                 << balance.balanceErrorMm << ","
+                 << balance.rootDepthMm << ","
+                 << balance.rootDepthStorageRebaseMm << ","
+                 << balance.balanceResidualMm << "\n";
+        } else {
+            for (int i = 0; i < 8; ++i) {
+                file << ",";
+            }
+            file << "\n";
+        }
     }
-    return file.good();
+    return writeAtomically(filePath, file.str());
 }
 
 // Implementación de parser JSON liviano y robusto para configuración
@@ -250,7 +415,9 @@ SimulationConfig JsonSerializer::parseConfig(const std::string& jsonContent) {
     double days = extractJsonNumberField(jsonContent, "simulationDays", 120.0);
     config.simulationDays = static_cast<int>(days);
 
-    double initMoist = extractJsonNumberField(jsonContent, "initialMoisturePercent", 16.0);
+    const auto& defaultSoil = AgronomicData::getSoil(config.soilType);
+    const double midpointMoisture = 0.5 * (defaultSoil.wiltingPoint + defaultSoil.fieldCapacity);
+    double initMoist = extractJsonNumberField(jsonContent, "initialMoisturePercent", midpointMoisture);
     config.initialMoisturePercent = initMoist;
 
     std::string scenStr = extractJsonStringField(jsonContent, "droughtScenario");

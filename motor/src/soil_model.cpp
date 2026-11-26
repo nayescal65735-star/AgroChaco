@@ -1,6 +1,7 @@
 #include "agrochaco/soil_model.hpp"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace agrochaco {
 
@@ -22,6 +23,15 @@ double SoilModel::calculateKs(double moisture, double fc, double wp, double depl
     return std::clamp(ks, 0.0, 1.0);
 }
 
+void SoilModel::validateForcing(double etPotential, double precipitation) {
+    if (!std::isfinite(precipitation) || precipitation < 0.0) {
+        throw std::invalid_argument("La precipitación incidente debe ser finita y no negativa.");
+    }
+    if (!std::isfinite(etPotential) || etPotential < 0.0) {
+        throw std::invalid_argument("La demanda ETc debe ser finita y no negativa.");
+    }
+}
+
 SoilModel::CellBalanceResult SoilModel::updateCellMoisture(
     double currentMoisture,
     const SoilInfo& soil,
@@ -31,9 +41,22 @@ SoilModel::CellBalanceResult SoilModel::updateCellMoisture(
 ) {
     CellBalanceResult result;
 
-    if (rootDepthMeters <= 0.05) rootDepthMeters = 0.30;
-    if (precipitation < 0.0) precipitation = 0.0;
-    if (etPotential < 0.0) etPotential = 0.0;
+    validateForcing(etPotential, precipitation);
+
+    if (!std::isfinite(currentMoisture) || !std::isfinite(rootDepthMeters) || rootDepthMeters <= 0.05) {
+        throw std::invalid_argument("La humedad actual y la profundidad radicular deben ser finitas y positivas.");
+    }
+    if (!std::isfinite(soil.fieldCapacity) || !std::isfinite(soil.wiltingPoint) ||
+        soil.fieldCapacity <= soil.wiltingPoint) {
+        throw std::invalid_argument("Propiedades edáficas inválidas: se requiere CC > PMP y valores finitos.");
+    }
+
+    // Guardia exclusivamente de redondeo machine-epsilon; no es una tolerancia hidrológica.
+    const double scale = std::max({1.0, std::abs(soil.wiltingPoint), std::abs(soil.fieldCapacity)});
+    const double roundoff = 32.0 * std::numeric_limits<double>::epsilon() * scale;
+    if (currentMoisture < soil.wiltingPoint - roundoff || currentMoisture > soil.fieldCapacity + roundoff) {
+        throw std::invalid_argument("La humedad inicial de la celda debe encontrarse en el intervalo físico [PMP, CC].");
+    }
 
     double depthMm = rootDepthMeters * 1000.0;
 
@@ -61,14 +84,9 @@ SoilModel::CellBalanceResult SoilModel::updateCellMoisture(
     double etDemand = etPotential * ks;
     double etActual = std::min(etDemand, availableExtractableMm);
 
-    // 4. Actualización del contenido final de agua en el suelo
-    // Conservación estricta: W_final = W_después_de_lluvia - ETa
+    // 4. Actualización del contenido final de agua en el suelo.
+    // ETa ya está limitada por (W_después_de_lluvia - W_PMP): no se inyecta agua para forzar el PMP.
     double finalWaterMm = waterAfterRainMm - etActual;
-
-    // Límite físico de seguridad: no caer por debajo de PMP por transpiración
-    if (finalWaterMm < waterWpMm) {
-        finalWaterMm = waterWpMm;
-    }
 
     double finalMoisturePercent = (finalWaterMm / depthMm) * 100.0;
 
@@ -84,7 +102,8 @@ SoilModel::CellBalanceResult SoilModel::updateCellMoisture(
 
     // 6. Verificación de balance de masa: DeltaW + ETa + Drenaje == Precipitación
     double deltaStorageMm = finalWaterMm - initialWaterMm;
-    double massBalanceError = std::abs((deltaStorageMm + etActual + deepDrainage) - precipitation);
+    double massBalanceResidualMm = (deltaStorageMm + etActual + deepDrainage) - precipitation;
+    double massBalanceError = std::abs(massBalanceResidualMm);
 
     result.updatedMoisturePercent = finalMoisturePercent;
     result.etActual = etActual;
@@ -95,6 +114,7 @@ SoilModel::CellBalanceResult SoilModel::updateCellMoisture(
     result.finalWaterMm = finalWaterMm;
     result.deltaStorageMm = deltaStorageMm;
     result.massBalanceError = massBalanceError;
+    result.massBalanceResidualMm = massBalanceResidualMm;
 
     return result;
 }

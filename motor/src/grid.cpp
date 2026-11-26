@@ -5,8 +5,25 @@
 #include <mpi.h>
 #include <omp.h>
 #include <stdexcept>
+#include <exception>
 
 namespace agrochaco {
+
+static void checkMpiCall(int code, const char* operation) {
+    if (code != MPI_SUCCESS) {
+        throw std::runtime_error(std::string("Fallo MPI en ") + operation);
+    }
+}
+
+static void calculatePartition(int cellCount, int rank, int processCount, int& start, int& end) {
+    if (processCount <= 0 || rank < 0 || rank >= processCount || cellCount < 0) {
+        throw std::invalid_argument("Rango, cantidad de procesos o tamaño de malla inválidos");
+    }
+    const long long total = cellCount;
+    const long long processes = processCount;
+    start = static_cast<int>((total * rank) / processes);
+    end = static_cast<int>((total * (rank + 1)) / processes);
+}
 
 SpatialGrid::SpatialGrid(int rows, int cols, double cellSizeMeters, double initialMoisture, const SoilInfo& soil)
     : rows_(rows > 0 ? rows : 10),
@@ -15,6 +32,17 @@ SpatialGrid::SpatialGrid(int rows, int cols, double cellSizeMeters, double initi
       moisture_(rows_ * cols_, initialMoisture),
       cwsi_(rows_ * cols_, 0.0),
       depthFactor_(rows_ * cols_, 1.0) {
+
+    if (!std::isfinite(soil.fieldCapacity) || !std::isfinite(soil.wiltingPoint) ||
+        soil.fieldCapacity <= soil.wiltingPoint) {
+        throw std::invalid_argument("Propiedades edáficas inválidas para inicializar la malla.");
+    }
+    if (!std::isfinite(initialMoisture) || initialMoisture < soil.wiltingPoint ||
+        initialMoisture > soil.fieldCapacity) {
+        throw std::invalid_argument(
+            "La humedad inicial de la malla debe estar en [PMP, CC]; no se aplica recorte silencioso."
+        );
+    }
 
     // Inicialización del factor de variación edáfica (profundidad de suelo efectiva)
     // Simula variaciones suaves de micro-topografía en la parcela chaqueña.
@@ -34,8 +62,8 @@ SpatialGrid::SpatialGrid(int rows, int cols, double cellSizeMeters, double initi
             depthFactor_[idx] = factor;
             factorSum += factor;
 
-            // La humedad inicial se acota físicamente entre PMP y Capacidad de Campo
-            moisture_[idx] = std::clamp(initialMoisture, soil.wiltingPoint, soil.fieldCapacity);
+            // La humedad inicial se conserva exactamente: ya fue validada en [PMP, CC].
+            moisture_[idx] = initialMoisture;
         }
     }
 
@@ -59,6 +87,9 @@ SpatialGrid::StepSummary SpatialGrid::updateDailyStep(
     double totalEta = 0.0;
     double totalDrainage = 0.0;
     double totalDeltaStorage = 0.0;
+    double totalInitialStorage = 0.0;
+    double totalFinalStorage = 0.0;
+    double totalResidual = 0.0;
     double maxMassError = 0.0;
     int cellCount = rows_ * cols_;
 
@@ -89,6 +120,9 @@ SpatialGrid::StepSummary SpatialGrid::updateDailyStep(
             totalEta += cellResult.etActual;
             totalDrainage += cellResult.deepDrainage;
             totalDeltaStorage += cellResult.deltaStorageMm;
+            totalInitialStorage += cellResult.initialWaterMm;
+            totalFinalStorage += cellResult.finalWaterMm;
+            totalResidual += cellResult.massBalanceResidualMm;
 
             if (cellResult.massBalanceError > maxMassError) {
                 maxMassError = cellResult.massBalanceError;
@@ -104,7 +138,16 @@ SpatialGrid::StepSummary SpatialGrid::updateDailyStep(
     summary.averagePrecipitation = precipitation;
     summary.averageDeepDrainage = totalDrainage / cellCount;
     summary.averageDeltaStorage = totalDeltaStorage / cellCount;
+    summary.averageInitialStorage = totalInitialStorage / cellCount;
+    summary.averageFinalStorage = totalFinalStorage / cellCount;
+    summary.rootDepthStorageRebaseMm = hasPreviousStorage_
+        ? (totalInitialStorage - previousFinalStorageSumMm_) / cellCount
+        : 0.0;
     summary.massBalanceError = maxMassError;
+    summary.massBalanceResidualMm = totalResidual / cellCount;
+
+    previousFinalStorageSumMm_ = totalFinalStorage;
+    hasPreviousStorage_ = true;
 
     return summary;
 }
@@ -121,27 +164,42 @@ SpatialGrid::StepSummary SpatialGrid::updateDailyStepOpenMP(
     double totalEta = 0.0;
     double totalDrainage = 0.0;
     double totalDeltaStorage = 0.0;
+    double totalInitialStorage = 0.0;
+    double totalFinalStorage = 0.0;
+    double totalResidual = 0.0;
     double maxMassError = 0.0;
+    int localFailures = 0;
     const int cellCount = rows_ * cols_;
 
-    #pragma omp parallel for schedule(static) reduction(+:totalMoisture,totalCwsi,totalEta,totalDrainage,totalDeltaStorage) reduction(max:maxMassError)
+    #pragma omp parallel for schedule(static) reduction(+:totalMoisture,totalCwsi,totalEta,totalDrainage,totalDeltaStorage,totalInitialStorage,totalFinalStorage,totalResidual,localFailures) reduction(max:maxMassError)
     for (int idx = 0; idx < cellCount; ++idx) {
-        const double cellDepth = rootDepthMeters * depthFactor_[idx];
+        try {
+            const double cellDepth = rootDepthMeters * depthFactor_[idx];
 
-        const auto cellResult = SoilModel::updateCellMoisture(
-            moisture_[idx], soil, etPotential, precipitation, cellDepth
-        );
+            const auto cellResult = SoilModel::updateCellMoisture(
+                moisture_[idx], soil, etPotential, precipitation, cellDepth
+            );
 
-        moisture_[idx] = cellResult.updatedMoisturePercent;
-        cwsi_[idx] = cellResult.cwsi;
+            moisture_[idx] = cellResult.updatedMoisturePercent;
+            cwsi_[idx] = cellResult.cwsi;
 
-        totalMoisture += cellResult.updatedMoisturePercent;
-        totalCwsi += cellResult.cwsi;
-        totalEta += cellResult.etActual;
-        totalDrainage += cellResult.deepDrainage;
-        totalDeltaStorage += cellResult.deltaStorageMm;
+            totalMoisture += cellResult.updatedMoisturePercent;
+            totalCwsi += cellResult.cwsi;
+            totalEta += cellResult.etActual;
+            totalDrainage += cellResult.deepDrainage;
+            totalDeltaStorage += cellResult.deltaStorageMm;
+            totalInitialStorage += cellResult.initialWaterMm;
+            totalFinalStorage += cellResult.finalWaterMm;
+            totalResidual += cellResult.massBalanceResidualMm;
 
-        maxMassError = std::max(maxMassError, cellResult.massBalanceError);
+            maxMassError = std::max(maxMassError, cellResult.massBalanceError);
+        } catch (const std::exception&) {
+            ++localFailures;
+        }
+    }
+
+    if (localFailures > 0) {
+        throw std::runtime_error("Falló el balance de al menos una celda en la región OpenMP.");
     }
 
     StepSummary summary;
@@ -152,7 +210,16 @@ SpatialGrid::StepSummary SpatialGrid::updateDailyStepOpenMP(
     summary.averagePrecipitation = precipitation;
     summary.averageDeepDrainage = totalDrainage / cellCount;
     summary.averageDeltaStorage = totalDeltaStorage / cellCount;
+    summary.averageInitialStorage = totalInitialStorage / cellCount;
+    summary.averageFinalStorage = totalFinalStorage / cellCount;
+    summary.rootDepthStorageRebaseMm = hasPreviousStorage_
+        ? (totalInitialStorage - previousFinalStorageSumMm_) / cellCount
+        : 0.0;
     summary.massBalanceError = maxMassError;
+    summary.massBalanceResidualMm = totalResidual / cellCount;
+
+    previousFinalStorageSumMm_ = totalFinalStorage;
+    hasPreviousStorage_ = true;
 
     return summary;
 }
@@ -165,50 +232,77 @@ SpatialGrid::StepSummary SpatialGrid::updateDailyStepMPI(
     double precipitation,
     double rootDepthMeters,
     int rank,
-    int processCount
+    int processCount,
+    MPI_Comm comm
 ) {
-    if (processCount <= 0 || rank < 0 || rank >= processCount) {
-        throw std::invalid_argument("Rango o cantidad de procesos MPI inválidos");
-    }
-
     const int cellCount = rows_ * cols_;
-    const int start = (cellCount * rank) / processCount;
-    const int end = (cellCount * (rank + 1)) / processCount;
+    int start = 0;
+    int end = 0;
+    calculatePartition(cellCount, rank, processCount, start, end);
 
-    double localSums[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+    double localSums[8] = {};
     double localMaxMassError = 0.0;
+    double localPreviousFinalStorage = hasPreviousStorage_ ? previousFinalStorageSumMm_ : 0.0;
+    double globalPreviousFinalStorage = 0.0;
+    int localFailure = 0;
 
-    for (int idx = start; idx < end; ++idx) {
-        const double cellDepth = rootDepthMeters * depthFactor_[idx];
+    try {
+        for (int idx = start; idx < end; ++idx) {
+            const double cellDepth = rootDepthMeters * depthFactor_[idx];
 
-        const auto cellResult = SoilModel::updateCellMoisture(
-            moisture_[idx], soil, etPotential, precipitation, cellDepth
-        );
+            const auto cellResult = SoilModel::updateCellMoisture(
+                moisture_[idx], soil, etPotential, precipitation, cellDepth
+            );
 
-        moisture_[idx] = cellResult.updatedMoisturePercent;
-        cwsi_[idx] = cellResult.cwsi;
+            moisture_[idx] = cellResult.updatedMoisturePercent;
+            cwsi_[idx] = cellResult.cwsi;
 
-        localSums[0] += cellResult.updatedMoisturePercent;
-        localSums[1] += cellResult.cwsi;
-        localSums[2] += cellResult.etActual;
-        localSums[3] += cellResult.deepDrainage;
-        localSums[4] += cellResult.deltaStorageMm;
+            localSums[0] += cellResult.updatedMoisturePercent;
+            localSums[1] += cellResult.cwsi;
+            localSums[2] += cellResult.etActual;
+            localSums[3] += cellResult.deepDrainage;
+            localSums[4] += cellResult.deltaStorageMm;
+            localSums[5] += cellResult.initialWaterMm;
+            localSums[6] += cellResult.finalWaterMm;
+            localSums[7] += cellResult.massBalanceResidualMm;
 
-        localMaxMassError = std::max(
-            localMaxMassError, cellResult.massBalanceError
-        );
+            localMaxMassError = std::max(
+                localMaxMassError, cellResult.massBalanceError
+            );
+        }
+    } catch (const std::exception&) {
+        localFailure = 1;
     }
 
-    double globalSums[5] = {};
+    int globalFailure = 0;
+    checkMpiCall(
+        MPI_Allreduce(&localFailure, &globalFailure, 1, MPI_INT, MPI_MAX, comm),
+        "MPI_Allreduce(failure)"
+    );
+    if (globalFailure != 0) {
+        throw std::runtime_error("Falló el balance de al menos una celda MPI.");
+    }
+
+    double globalSums[8] = {};
     double globalMaxMassError = 0.0;
 
-    MPI_Allreduce(
-        localSums, globalSums, 5, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD
+    checkMpiCall(
+        MPI_Allreduce(localSums, globalSums, 8, MPI_DOUBLE, MPI_SUM, comm),
+        "MPI_Allreduce(sums)"
     );
-
-    MPI_Allreduce(
-        &localMaxMassError, &globalMaxMassError,
-        1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD
+    checkMpiCall(
+        MPI_Allreduce(
+            &localPreviousFinalStorage, &globalPreviousFinalStorage,
+            1, MPI_DOUBLE, MPI_SUM, comm
+        ),
+        "MPI_Allreduce(previous storage)"
+    );
+    checkMpiCall(
+        MPI_Allreduce(
+            &localMaxMassError, &globalMaxMassError,
+            1, MPI_DOUBLE, MPI_MAX, comm
+        ),
+        "MPI_Allreduce(error)"
     );
 
     StepSummary summary;
@@ -219,7 +313,16 @@ SpatialGrid::StepSummary SpatialGrid::updateDailyStepMPI(
     summary.averagePrecipitation = precipitation;
     summary.averageDeepDrainage = globalSums[3] / cellCount;
     summary.averageDeltaStorage = globalSums[4] / cellCount;
+    summary.averageInitialStorage = globalSums[5] / cellCount;
+    summary.averageFinalStorage = globalSums[6] / cellCount;
+    summary.rootDepthStorageRebaseMm = hasPreviousStorage_
+        ? (globalSums[5] - globalPreviousFinalStorage) / cellCount
+        : 0.0;
     summary.massBalanceError = globalMaxMassError;
+    summary.massBalanceResidualMm = globalSums[7] / cellCount;
+
+    previousFinalStorageSumMm_ = localSums[6];
+    hasPreviousStorage_ = true;
 
     return summary;
 }
@@ -231,52 +334,80 @@ SpatialGrid::StepSummary SpatialGrid::updateDailyStepHybrid(
     double precipitation,
     double rootDepthMeters,
     int rank,
-    int processCount
+    int processCount,
+    MPI_Comm comm
 ) {
-    if (processCount <= 0 || rank < 0 || rank >= processCount) {
-        throw std::invalid_argument("Rango o cantidad de procesos MPI inválidos");
-    }
-
     const int cellCount = rows_ * cols_;
-    const int start = (cellCount * rank) / processCount;
-    const int end = (cellCount * (rank + 1)) / processCount;
+    int start = 0;
+    int end = 0;
+    calculatePartition(cellCount, rank, processCount, start, end);
 
-    double localSums[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+    double localSums[8] = {};
     double localMaxMassError = 0.0;
+    double localPreviousFinalStorage = hasPreviousStorage_ ? previousFinalStorageSumMm_ : 0.0;
+    double globalPreviousFinalStorage = 0.0;
+    int localFailures = 0;
 
     #pragma omp parallel for schedule(static) \
-        reduction(+:localSums[:5]) reduction(max:localMaxMassError)
+        reduction(+:localSums[:8],localFailures) reduction(max:localMaxMassError)
     for (int idx = start; idx < end; ++idx) {
-        const double cellDepth = rootDepthMeters * depthFactor_[idx];
+        try {
+            const double cellDepth = rootDepthMeters * depthFactor_[idx];
 
-        const auto cellResult = SoilModel::updateCellMoisture(
-            moisture_[idx], soil, etPotential, precipitation, cellDepth
-        );
+            const auto cellResult = SoilModel::updateCellMoisture(
+                moisture_[idx], soil, etPotential, precipitation, cellDepth
+            );
 
-        moisture_[idx] = cellResult.updatedMoisturePercent;
-        cwsi_[idx] = cellResult.cwsi;
+            moisture_[idx] = cellResult.updatedMoisturePercent;
+            cwsi_[idx] = cellResult.cwsi;
 
-        localSums[0] += cellResult.updatedMoisturePercent;
-        localSums[1] += cellResult.cwsi;
-        localSums[2] += cellResult.etActual;
-        localSums[3] += cellResult.deepDrainage;
-        localSums[4] += cellResult.deltaStorageMm;
+            localSums[0] += cellResult.updatedMoisturePercent;
+            localSums[1] += cellResult.cwsi;
+            localSums[2] += cellResult.etActual;
+            localSums[3] += cellResult.deepDrainage;
+            localSums[4] += cellResult.deltaStorageMm;
+            localSums[5] += cellResult.initialWaterMm;
+            localSums[6] += cellResult.finalWaterMm;
+            localSums[7] += cellResult.massBalanceResidualMm;
 
-        localMaxMassError = std::max(
-            localMaxMassError, cellResult.massBalanceError
-        );
+            localMaxMassError = std::max(
+                localMaxMassError, cellResult.massBalanceError
+            );
+        } catch (const std::exception&) {
+            ++localFailures;
+        }
     }
 
-    double globalSums[5] = {};
+    const int localFailure = localFailures > 0 ? 1 : 0;
+    int globalFailure = 0;
+    checkMpiCall(
+        MPI_Allreduce(&localFailure, &globalFailure, 1, MPI_INT, MPI_MAX, comm),
+        "MPI_Allreduce(failure)"
+    );
+    if (globalFailure != 0) {
+        throw std::runtime_error("Falló el balance de al menos una celda híbrida.");
+    }
+
+    double globalSums[8] = {};
     double globalMaxMassError = 0.0;
 
-    MPI_Allreduce(
-        localSums, globalSums, 5, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD
+    checkMpiCall(
+        MPI_Allreduce(localSums, globalSums, 8, MPI_DOUBLE, MPI_SUM, comm),
+        "MPI_Allreduce(sums)"
     );
-
-    MPI_Allreduce(
-        &localMaxMassError, &globalMaxMassError,
-        1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD
+    checkMpiCall(
+        MPI_Allreduce(
+            &localPreviousFinalStorage, &globalPreviousFinalStorage,
+            1, MPI_DOUBLE, MPI_SUM, comm
+        ),
+        "MPI_Allreduce(previous storage)"
+    );
+    checkMpiCall(
+        MPI_Allreduce(
+            &localMaxMassError, &globalMaxMassError,
+            1, MPI_DOUBLE, MPI_MAX, comm
+        ),
+        "MPI_Allreduce(error)"
     );
 
     StepSummary summary;
@@ -287,16 +418,26 @@ SpatialGrid::StepSummary SpatialGrid::updateDailyStepHybrid(
     summary.averagePrecipitation = precipitation;
     summary.averageDeepDrainage = globalSums[3] / cellCount;
     summary.averageDeltaStorage = globalSums[4] / cellCount;
+    summary.averageInitialStorage = globalSums[5] / cellCount;
+    summary.averageFinalStorage = globalSums[6] / cellCount;
+    summary.rootDepthStorageRebaseMm = hasPreviousStorage_
+        ? (globalSums[5] - globalPreviousFinalStorage) / cellCount
+        : 0.0;
     summary.massBalanceError = globalMaxMassError;
+    summary.massBalanceResidualMm = globalSums[7] / cellCount;
+
+    previousFinalStorageSumMm_ = localSums[6];
+    hasPreviousStorage_ = true;
 
     return summary;
 }
 
 
-void SpatialGrid::synchronizeForMPI(int rank, int processCount) {
+void SpatialGrid::synchronizeForMPI(int rank, int processCount, MPI_Comm comm) {
     const int cellCount = rows_ * cols_;
-    const int start = (cellCount * rank) / processCount;
-    const int end = (cellCount * (rank + 1)) / processCount;
+    int start = 0;
+    int end = 0;
+    calculatePartition(cellCount, rank, processCount, start, end);
 
     for (int idx = 0; idx < cellCount; ++idx) {
         if (idx < start || idx >= end) {
@@ -305,14 +446,20 @@ void SpatialGrid::synchronizeForMPI(int rank, int processCount) {
         }
     }
 
-    MPI_Allreduce(
-        MPI_IN_PLACE, moisture_.data(), cellCount,
-        MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD
+    checkMpiCall(
+        MPI_Allreduce(
+            MPI_IN_PLACE, moisture_.data(), cellCount,
+            MPI_DOUBLE, MPI_SUM, comm
+        ),
+        "MPI_Allreduce(moisture)"
     );
 
-    MPI_Allreduce(
-        MPI_IN_PLACE, cwsi_.data(), cellCount,
-        MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD
+    checkMpiCall(
+        MPI_Allreduce(
+            MPI_IN_PLACE, cwsi_.data(), cellCount,
+            MPI_DOUBLE, MPI_SUM, comm
+        ),
+        "MPI_Allreduce(cwsi)"
     );
 }
 

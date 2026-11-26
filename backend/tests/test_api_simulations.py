@@ -323,7 +323,7 @@ class TestApiSimulationsPostgres(unittest.TestCase):
             "soilType": "franco_arenoso",
             "cornVariety": "iniaf_h1",
             "simulationDays": 100,
-            "initialMoisturePercent": 20.0,
+            "initialMoisturePercent": 18.5,
             "droughtScenario": "extremo_ssp585",
             "engine": "hibrido",
             "gridConfig": {"rows": 80, "cols": 80, "cellSizeMeters": 50},
@@ -348,7 +348,12 @@ class TestApiSimulationsPostgres(unittest.TestCase):
         with self.assertRaises(MotorTimeoutError):
             MotorService.ejecutar(
                 simulation_id="SIM-TIMEOUT-001",
-                config_dict={"engine": "secuencial", "simulationDays": 30},
+                config_dict={
+                    "engine": "secuencial",
+                    "simulationDays": 30,
+                    "soilType": "franco_arenoso",
+                    "initialMoisturePercent": 18.5,
+                },
                 timeout_seconds=5,
             )
 
@@ -364,7 +369,11 @@ class TestApiSimulationsPostgres(unittest.TestCase):
         with self.assertRaises(MotorExecutionError) as ctx:
             MotorService.ejecutar(
                 simulation_id="SIM-FAIL-001",
-                config_dict={"engine": "secuencial"},
+                config_dict={
+                    "engine": "secuencial",
+                    "soilType": "franco_arenoso",
+                    "initialMoisturePercent": 18.5,
+                },
             )
         self.assertIn("código 139", str(ctx.exception))
 
@@ -385,7 +394,11 @@ class TestApiSimulationsPostgres(unittest.TestCase):
         with self.assertRaises(MotorOutputError):
             MotorService.ejecutar(
                 simulation_id="SIM-CORRUPT-001",
-                config_dict={"engine": "secuencial"},
+                config_dict={
+                    "engine": "secuencial",
+                    "soilType": "franco_arenoso",
+                    "initialMoisturePercent": 18.5,
+                },
             )
 
     # --------------------------------------------------------------------------
@@ -454,6 +467,18 @@ class TestApiSimulationsPostgres(unittest.TestCase):
                 "nominalYieldTnHa": 5.40,
                 "waterDeficitMm": 45.20,
                 "memoryUsageMb": 8.50,
+                "waterBalanceSummary": {
+                    "precipitationTotalMm": 12.0,
+                    "etcTotalMm": 4.6,
+                    "etaTotalMm": 4.1,
+                    "deepDrainageTotalMm": 3.0,
+                    "surfaceRunoffTotalMm": None,
+                    "storageInitialMm": 90.0,
+                    "storageFinalMm": 94.9,
+                    "storageChangeMm": 4.9,
+                    "maxDailyBalanceErrorMm": 0.000001,
+                    "rootDepthStorageRebaseTotalMm": 0.0,
+                },
                 "timelineData": [
                     {
                         "day": 1,
@@ -464,6 +489,19 @@ class TestApiSimulationsPostgres(unittest.TestCase):
                         "cwsi": 0.10,
                         "soilMoisture": 18.0,
                         "precipitation": 0.0,
+                        "waterBalance": {
+                            "precipitationMm": 0.0,
+                            "etcMm": 2.1,
+                            "etaMm": 2.1,
+                            "deepDrainageMm": 0.0,
+                            "surfaceRunoffMm": None,
+                            "storageInitialMm": 90.0,
+                            "storageFinalMm": 87.9,
+                            "storageChangeMm": -2.1,
+                            "balanceErrorMm": 0.0,
+                            "rootDepthMm": 250.0,
+                            "rootDepthStorageRebaseMm": 0.0,
+                        },
                     },
                     {
                         "day": 2,
@@ -474,6 +512,19 @@ class TestApiSimulationsPostgres(unittest.TestCase):
                         "cwsi": 0.45,
                         "soilMoisture": 14.8,
                         "precipitation": 0.0,
+                        "waterBalance": {
+                            "precipitationMm": 12.0,
+                            "etcMm": 2.5,
+                            "etaMm": 2.0,
+                            "deepDrainageMm": 3.0,
+                            "surfaceRunoffMm": None,
+                            "storageInitialMm": 87.9,
+                            "storageFinalMm": 94.9,
+                            "storageChangeMm": 7.0,
+                            "balanceErrorMm": 0.000001,
+                            "rootDepthMm": 260.0,
+                            "rootDepthStorageRebaseMm": 0.0,
+                        },
                     },
                 ],
                 "logs": [],
@@ -536,6 +587,11 @@ class TestApiSimulationsPostgres(unittest.TestCase):
             fetched = get_simulation(sim_id, db=self.db)
             self.assertEqual(len(fetched["timelineData"]), 2)
             self.assertEqual(fetched["yieldLossPercent"], 22.50)
+            self.assertIsNotNone(fetched["waterBalanceSummary"])
+            self.assertIsNone(fetched["waterBalanceSummary"]["surfaceRunoffTotalMm"])
+            self.assertAlmostEqual(fetched["waterBalanceSummary"]["maxDailyBalanceErrorMm"], 0.000001)
+            self.assertIsNotNone(fetched["timelineData"][1]["waterBalance"])
+            self.assertIsNone(fetched["timelineData"][1]["waterBalance"]["surfaceRunoffMm"])
 
         finally:
             delete_simulation(sim_id, db=self.db)

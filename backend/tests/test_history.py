@@ -87,7 +87,10 @@ def _crear_simulaciones_de_prueba(session: Session) -> list[str]:
                 "agua_inicial": Decimal("20.00"),
                 "capacidad_suelo": Decimal("100.00"),
                 "umbral_hidrico": Decimal("50.00"),
-                "configuracion_json": {"zoneName": nombre.split()[1]},
+                "configuracion_json": {
+                    "zoneName": nombre.split()[1],
+                    "soilType": "franco",
+                },
             },
         )
 

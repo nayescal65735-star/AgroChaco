@@ -71,6 +71,8 @@ int main(int argc, char* argv[]) {
         if (overrideDays != -1) config.simulationDays = overrideDays;
         if (overrideRows != -1) config.gridConfig.rows = overrideRows;
         if (overrideCols != -1) config.gridConfig.cols = overrideCols;
+        config.engine = SimulationEngine::OPENMP;
+        config.nodesCount = 1;
 
         std::vector<std::string> errors;
         if (!ConfigValidator::validate(config, errors)) {
@@ -97,6 +99,9 @@ int main(int argc, char* argv[]) {
             std::cerr << "[ERROR] La simulación no terminó correctamente.\n";
             return 3;
         }
+
+        std::cout << "Hilos OpenMP efectivos: "
+                  << result.config.openmpThreads.value_or(0) << "\n";
 
         std::cout << std::fixed << std::setprecision(4)
                   << "Tiempo OpenMP: " << result.executionTimeSeconds << " s\n"

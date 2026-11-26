@@ -95,6 +95,8 @@ int main(int argc, char* argv[]) {
     if (overrideDays != -1) config.simulationDays = overrideDays;
     if (overrideRows != -1) config.gridConfig.rows = overrideRows;
     if (overrideCols != -1) config.gridConfig.cols = overrideCols;
+    config.engine = SimulationEngine::SECUENCIAL;
+    config.nodesCount = 1;
 
     std::cout << "[CONFIG] ID Simulación:       " << config.id << "\n"
               << "[CONFIG] Nombre:              " << config.name << "\n"
@@ -152,7 +154,8 @@ int main(int argc, char* argv[]) {
     if (!outputFile.empty()) {
         std::cout << "[INFO] Guardando resultados JSON en: " << outputFile << "\n";
         if (!JsonSerializer::saveResultToFile(result, outputFile)) {
-            std::cerr << "[ADVERTENCIA] No fue posible escribir el archivo JSON en: " << outputFile << "\n";
+            std::cerr << "[ERROR] No fue posible escribir el archivo JSON en: " << outputFile << "\n";
+            return 4;
         } else {
             std::cout << "[OK] Archivo JSON generado exitosamente.\n";
         }
@@ -162,7 +165,8 @@ int main(int argc, char* argv[]) {
     if (!csvFile.empty()) {
         std::cout << "[INFO] Guardando serie temporal CSV en: " << csvFile << "\n";
         if (!JsonSerializer::exportTimelineToCsv(result, csvFile)) {
-            std::cerr << "[ADVERTENCIA] No fue posible escribir el archivo CSV en: " << csvFile << "\n";
+            std::cerr << "[ERROR] No fue posible escribir el archivo CSV en: " << csvFile << "\n";
+            return 5;
         } else {
             std::cout << "[OK] Archivo CSV generado exitosamente.\n";
         }

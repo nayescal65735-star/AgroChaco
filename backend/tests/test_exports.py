@@ -29,6 +29,7 @@ from app.api.simulations import export_simulation_csv, export_simulation_json
 from app.db.repository import SimulationRepository
 from app.models import EventoEjecucion, Rendimiento, Simulacion
 from app.services.export_service import ExportService
+from app.services.motor_service import PROJECT_ROOT
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -71,9 +72,9 @@ def _crear_simulacion_completa(session: Session, sim_id: str) -> Simulacion:
             "semilla": 12345,
         },
         {
-            "agua_inicial": Decimal("22.50"),
-            "capacidad_suelo": Decimal("125.00"),
-            "umbral_hidrico": Decimal("62.50"),
+            "agua_inicial": Decimal("18.50"),
+            "capacidad_suelo": Decimal("103.00"),
+            "umbral_hidrico": Decimal("51.50"),
             "configuracion_json": {
                 "zone": "yacuiba",
                 "zoneName": "Yacuiba",
@@ -140,7 +141,7 @@ def test_exportar_simulacion_json(db_session):
 
     assert data["id"] == sim_id
     assert data["nombre"] == "Simulación Completa Exportación Ñandú Yacuiba"
-    assert data["parametros"]["aguaInicial"] == 22.50
+    assert data["parametros"]["aguaInicial"] == 18.50
     assert data["parametros"]["configuracion"]["zone"] == "yacuiba"
     assert data["resultados"]["deficitMaximo"] == 0.7250
     assert len(data["rendimiento"]) == 1
@@ -153,6 +154,91 @@ def test_exportar_simulacion_json(db_session):
     json_str = ExportService.exportar_simulacion_json_str(sim)
     parsed = json.loads(json_str)
     assert parsed["id"] == sim_id
+
+
+def test_exportar_balance_hidrico_detalle(db_session):
+    sim_id = f"SIM-BAL-{uuid4().hex[:8].upper()}"
+    SimulationRepository.crear_simulacion_con_parametros(
+        db_session,
+        {
+            "id": sim_id,
+            "nombre": f"Simulación Balance {sim_id}",
+            "fuente_datos": "SENAMHI",
+            "escenario": "historico",
+            "cantidad_escenarios": 1,
+            "dias": 1,
+            "estado": "completed",
+        },
+        {
+            "agua_inicial": Decimal("15.00"),
+            "capacidad_suelo": Decimal("103.00"),
+            "umbral_hidrico": Decimal("51.50"),
+            "configuracion_json": {"soilType": "franco_arenoso"},
+        },
+    )
+
+    resumen = {
+        "precipitationTotalMm": 25.0,
+        "etcTotalMm": 4.0,
+        "etaTotalMm": 4.0,
+        "deepDrainageTotalMm": 4.0,
+        "surfaceRunoffTotalMm": None,
+        "storageInitialMm": 90.0,
+        "storageFinalMm": 107.0,
+        "storageChangeMm": 17.0,
+        "maxDailyBalanceErrorMm": 0.0,
+        "rootDepthStorageRebaseTotalMm": 0.0,
+    }
+    detalle = {
+        "status": "completed",
+        "waterBalanceSummary": resumen,
+        "timelineData": [
+            {
+                "day": 1,
+                "waterBalance": {
+                    "precipitationMm": 25.0,
+                    "etcMm": 4.0,
+                    "etaMm": 4.0,
+                    "deepDrainageMm": 4.0,
+                    "surfaceRunoffMm": None,
+                    "storageInitialMm": 90.0,
+                    "storageFinalMm": 107.0,
+                    "storageChangeMm": 17.0,
+                    "balanceErrorMm": 0.0,
+                    "rootDepthMm": 600.0,
+                    "rootDepthStorageRebaseMm": 0.0,
+                },
+            }
+        ],
+    }
+
+    directorio = PROJECT_ROOT / "results" / "simulations"
+    directorio.mkdir(parents=True, exist_ok=True)
+    ruta = directorio / f"{sim_id}.json"
+    ruta.write_text(json.dumps(detalle), encoding="utf-8")
+
+    SimulationRepository.guardar_resultados(
+        db_session,
+        sim_id,
+        {
+            "deficit_medio": Decimal("0.1000"),
+            "deficit_maximo": Decimal("0.1000"),
+            "agua_final_media": Decimal("17.83"),
+            "agua_minima": Decimal("15.00"),
+            "escenarios_con_deficit": 1,
+            "archivo_detalle": f"results/simulations/{sim_id}.json",
+        },
+    )
+
+    try:
+        sim = SimulationRepository.obtener_por_id(db_session, sim_id, cargar_relaciones=True)
+        data = ExportService.exportar_simulacion_json(sim)
+        assert data["balanceHidrico"]["disponible"] is True
+        assert data["balanceHidrico"]["resumen"] == resumen
+        assert data["balanceHidrico"]["serie"][0]["deepDrainageMm"] == 4.0
+        assert data["balanceHidrico"]["serie"][0]["surfaceRunoffMm"] is None
+    finally:
+        ruta.unlink(missing_ok=True)
 
 
 def test_exportar_historial_csv(db_session):
@@ -204,7 +290,7 @@ def test_exportar_metricas_hpc_no_disponibles(db_session):
             "agua_inicial": Decimal("18.00"),
             "capacidad_suelo": Decimal("100.00"),
             "umbral_hidrico": Decimal("50.00"),
-            "configuracion_json": {"engine": "mpi"},
+            "configuracion_json": {"engine": "mpi", "soilType": "franco_arenoso"},
         },
     )
 
@@ -316,7 +402,7 @@ def test_endpoint_exportar_json_conserva_metricas_no_disponibles(db_session):
             "agua_inicial": Decimal("18.00"),
             "capacidad_suelo": Decimal("100.00"),
             "umbral_hidrico": Decimal("50.00"),
-            "configuracion_json": {"engine": "mpi"},
+            "configuracion_json": {"engine": "mpi", "soilType": "franco_arenoso"},
         },
     )
     SimulationRepository.guardar_rendimiento(

@@ -13,6 +13,11 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.repository import SimulationRepository
 from app.models.evento_ejecucion import EventoEjecucion
+from app.models.parametro import (
+    canonizar_humedad_inicial,
+    sincronizar_humedad_json,
+    validar_humedad_inicial,
+)
 from app.models.simulacion import Simulacion
 from app.services.export_service import ExportService
 from app.services.motor_service import MotorSecurityError, MotorService, PROJECT_ROOT
@@ -112,12 +117,17 @@ class SimulationCreate(BaseModel):
     plantingDate: date
     simulationDays: int = Field(ge=30, le=150)
     gridConfig: GridConfig
-    initialMoisturePercent: float = Field(ge=5, le=35)
+    initialMoisturePercent: float = Field(ge=0, le=100, allow_inf_nan=False)
     droughtScenario: DroughtScenario
     engine: Engine
     openmpThreads: int | None = Field(default=None, ge=2, le=16)
     mpiProcesses: int | None = Field(default=None, ge=2, le=16)
     nodesCount: int | None = Field(default=None, ge=1, le=4)
+
+    @model_validator(mode="after")
+    def validate_initial_moisture_for_soil(self):
+        validar_humedad_inicial(self.initialMoisturePercent, self.soilType)
+        return self
 
     @model_validator(mode="after")
     def validate_engine_parameters(self):
@@ -161,6 +171,8 @@ def _format_simulation_response(sim: Simulacion) -> dict[str, Any]:
     config_dict: dict[str, Any] = {}
     if sim.parametro and isinstance(sim.parametro.configuracion_json, dict):
         config_dict = dict(sim.parametro.configuracion_json)
+    if sim.parametro:
+        config_dict = sincronizar_humedad_json(config_dict, sim.parametro.agua_inicial)
 
     # Asegurar campos esenciales requeridos por el frontend si la simulación proviene de semillas u orígenes externos
     if "name" not in config_dict:
@@ -169,16 +181,12 @@ def _format_simulation_response(sim: Simulacion) -> dict[str, Any]:
         config_dict["droughtScenario"] = sim.escenario
     if "simulationDays" not in config_dict:
         config_dict["simulationDays"] = sim.dias
-    if "initialMoisturePercent" not in config_dict and sim.parametro:
-        config_dict["initialMoisturePercent"] = float(sim.parametro.agua_inicial)
     if "zone" not in config_dict:
         config_dict["zone"] = "yacuiba"
     if "zoneName" not in config_dict:
         config_dict["zoneName"] = config_dict.get("zone", "Yacuiba").capitalize()
     if "department" not in config_dict:
         config_dict["department"] = "Tarija"
-    if "soilType" not in config_dict:
-        config_dict["soilType"] = "franco_arenoso"
     if "cornVariety" not in config_dict:
         config_dict["cornVariety"] = "chaco_01_criollo"
     if "engine" not in config_dict:
@@ -202,6 +210,7 @@ def _format_simulation_response(sim: Simulacion) -> dict[str, Any]:
         "timelineData": [],
         "spatialGrid": [],
         "logs": [],
+        "waterBalanceSummary": None,
     }
 
     # Adjuntar métricas HPC si existen registradas en PostgreSQL
@@ -246,6 +255,8 @@ def _format_simulation_response(sim: Simulacion) -> dict[str, Any]:
                     if isinstance(detalles, dict):
                         if "timelineData" in detalles:
                             response_data["timelineData"] = detalles["timelineData"]
+                        if "waterBalanceSummary" in detalles:
+                            response_data["waterBalanceSummary"] = detalles["waterBalanceSummary"]
                         if "spatialGrid" in detalles:
                             response_data["spatialGrid"] = detalles["spatialGrid"]
                         if "logs" in detalles:
@@ -334,7 +345,11 @@ def export_simulation_csv(simulation_id: str, db: Session = Depends(get_db)):
 @router.post("", status_code=http_status.HTTP_201_CREATED)
 def create_simulation(data: SimulationCreate, db: Session = Depends(get_db)):
     simulation_id = f"SIM-{uuid4().hex[:12].upper()}"
-    config_dict = data.model_dump(mode="json")
+    humedad_canonica = canonizar_humedad_inicial(data.initialMoisturePercent)
+    validar_humedad_inicial(humedad_canonica, data.soilType)
+    config_dict = sincronizar_humedad_json(
+        data.model_dump(mode="json"), humedad_canonica
+    )
 
     cap_suelo, umbral_hid = SOIL_WATER_CAPACITY_MAP.get(
         data.soilType, (DEFAULT_SOIL_CAPACITY, DEFAULT_WATER_THRESHOLD)
@@ -352,7 +367,7 @@ def create_simulation(data: SimulationCreate, db: Session = Depends(get_db)):
     }
 
     datos_param = {
-        "agua_inicial": Decimal(str(data.initialMoisturePercent)),
+        "agua_inicial": humedad_canonica,
         "capacidad_suelo": cap_suelo,
         "umbral_hidrico": umbral_hid,
         "configuracion_json": config_dict,

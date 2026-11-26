@@ -9,6 +9,7 @@ import csv
 import io
 import json
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Generator
 
 from app.models import (
@@ -19,6 +20,8 @@ from app.models import (
     Resultado,
     Simulacion,
 )
+from app.models.parametro import sincronizar_humedad_json
+from app.services.motor_service import PROJECT_ROOT
 
 
 class ExportService:
@@ -32,6 +35,28 @@ class ExportService:
         if hasattr(valor, "isoformat"):
             return valor.isoformat()
         return valor
+
+    @staticmethod
+    def _leer_detalle_balance(simulacion: Simulacion) -> dict[str, Any] | None:
+        resultado = simulacion.resultado
+        if not resultado or not resultado.archivo_detalle:
+            return None
+
+        archivo_path = Path(resultado.archivo_detalle)
+        if not archivo_path.is_absolute():
+            archivo_path = PROJECT_ROOT / archivo_path
+
+        allowed_dir = (PROJECT_ROOT / "results" / "simulations").resolve()
+        try:
+            archivo_path = archivo_path.resolve()
+            if not archivo_path.is_relative_to(allowed_dir) or not archivo_path.is_file():
+                return None
+            with open(archivo_path, "r", encoding="utf-8") as f:
+                contenido = json.load(f)
+        except (OSError, ValueError, RuntimeError):
+            return None
+
+        return contenido if isinstance(contenido, dict) else None
 
     # --------------------------------------------------------------------------
     # 1. Exportación JSON
@@ -63,12 +88,15 @@ class ExportService:
         # Parámetros asociados
         if simulacion.parametro:
             p: Parametro = simulacion.parametro
+            configuracion = p.configuracion_json
+            if isinstance(configuracion, dict):
+                configuracion = sincronizar_humedad_json(configuracion, p.agua_inicial)
             data["parametros"] = {
                 "id": p.id,
                 "aguaInicial": cls._serializar_valor(p.agua_inicial),
                 "capacidadSuelo": cls._serializar_valor(p.capacidad_suelo),
                 "umbralHidrico": cls._serializar_valor(p.umbral_hidrico),
-                "configuracion": p.configuracion_json,
+                "configuracion": configuracion,
             }
 
         # Resultados consolidados
@@ -83,6 +111,20 @@ class ExportService:
                 "escenariosConDeficit": r.escenarios_con_deficit,
                 "archivoDetalle": r.archivo_detalle,
             }
+
+        detalle = cls._leer_detalle_balance(simulacion)
+        resumen = detalle.get("waterBalanceSummary") if detalle else None
+        serie = []
+        if detalle and isinstance(detalle.get("timelineData"), list):
+            serie = [
+                punto.get("waterBalance") if isinstance(punto, dict) else None
+                for punto in detalle["timelineData"]
+            ]
+        data["balanceHidrico"] = {
+            "disponible": resumen is not None,
+            "resumen": resumen,
+            "serie": serie,
+        }
 
         # Rendimientos HPC
         for rend in simulacion.rendimientos:

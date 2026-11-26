@@ -31,9 +31,11 @@ add_library(agrochaco_core STATIC
     src/config.cpp
     src/soil_model.cpp
     src/crop_model.cpp
+    src/water_balance.cpp
     src/grid.cpp
     src/metrics.cpp
     src/json_serializer.cpp
+    src/mpi_runtime.cpp
     src/simulation_engine.cpp
     src/openmp_engine.cpp
     src/mpi_engine.cpp
@@ -78,6 +80,26 @@ add_executable(agrochaco_hibrido
 )
 target_link_libraries(agrochaco_hibrido PRIVATE agrochaco_core MPI::MPI_CXX OpenMP::OpenMP_CXX)
 
-# Registro de pruebas unitarias en CTest
+# Ejecutable de pruebas MPI reales
+add_executable(test_motor_mpi
+    tests/test_mpi_validation.cpp
+)
+target_link_libraries(test_motor_mpi PRIVATE agrochaco_core MPI::MPI_CXX OpenMP::OpenMP_CXX)
+
+# Registro de pruebas unitarias e integración en CTest
 enable_testing()
 add_test(NAME AgroChaco_Tests COMMAND test_motor)
+add_test(
+    NAME AgroChaco_MPI_Tests
+    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 3 ${MPIEXEC_PREFLAGS} $<TARGET_FILE:test_motor_mpi> ${MPIEXEC_POSTFLAGS}
+)
+set_tests_properties(AgroChaco_MPI_Tests PROPERTIES TIMEOUT 60)
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(
+        NAME AgroChaco_Equivalence_7B3
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_equivalence_7b3.py
+    )
+    set_tests_properties(AgroChaco_Equivalence_7B3 PROPERTIES TIMEOUT 300)
+endif()

@@ -51,9 +51,9 @@ CHACO_SEEDS = [
             "semilla": 1024,
         },
         "parametro": {
-            "agua_inicial": Decimal("24.50"),
-            "capacidad_suelo": Decimal("130.00"),
-            "umbral_hidrico": Decimal("65.00"),
+            "agua_inicial": Decimal("18.50"),
+            "capacidad_suelo": Decimal("103.00"),
+            "umbral_hidrico": Decimal("51.50"),
             "configuracion_json": {
                 "zone": "yacuiba",
                 "zoneName": "Yacuiba",
@@ -122,9 +122,9 @@ CHACO_SEEDS = [
             "semilla": 2048,
         },
         "parametro": {
-            "agua_inicial": Decimal("16.00"),
-            "capacidad_suelo": Decimal("95.00"),
-            "umbral_hidrico": Decimal("48.00"),
+            "agua_inicial": Decimal("12.00"),
+            "capacidad_suelo": Decimal("72.00"),
+            "umbral_hidrico": Decimal("36.00"),
             "configuracion_json": {
                 "zone": "villamontes",
                 "zoneName": "Villa Montes",
@@ -182,8 +182,8 @@ CHACO_SEEDS = [
         },
         "parametro": {
             "agua_inicial": Decimal("20.00"),
-            "capacidad_suelo": Decimal("140.00"),
-            "umbral_hidrico": Decimal("70.00"),
+            "capacidad_suelo": Decimal("135.00"),
+            "umbral_hidrico": Decimal("67.50"),
             "configuracion_json": {
                 "zone": "charagua",
                 "zoneName": "Charagua Iyambae",
@@ -241,9 +241,9 @@ CHACO_SEEDS = [
             "semilla": 8192,
         },
         "parametro": {
-            "agua_inicial": Decimal("19.00"),
-            "capacidad_suelo": Decimal("110.00"),
-            "umbral_hidrico": Decimal("55.00"),
+            "agua_inicial": Decimal("18.50"),
+            "capacidad_suelo": Decimal("103.00"),
+            "umbral_hidrico": Decimal("51.50"),
             "configuracion_json": {
                 "zone": "machareti",
                 "zoneName": "Macharetí",
@@ -283,9 +283,9 @@ CHACO_SEEDS = [
             "semilla": 16384,
         },
         "parametro": {
-            "agua_inicial": Decimal("28.00"),
-            "capacidad_suelo": Decimal("150.00"),
-            "umbral_hidrico": Decimal("75.00"),
+            "agua_inicial": Decimal("24.00"),
+            "capacidad_suelo": Decimal("130.00"),
+            "umbral_hidrico": Decimal("65.00"),
             "configuracion_json": {
                 "zone": "carapari",
                 "zoneName": "Caraparí",
@@ -340,9 +340,9 @@ CHACO_SEEDS = [
             "semilla": 32768,
         },
         "parametro": {
-            "agua_inicial": Decimal("21.00"),
-            "capacidad_suelo": Decimal("115.00"),
-            "umbral_hidrico": Decimal("57.50"),
+            "agua_inicial": Decimal("18.50"),
+            "capacidad_suelo": Decimal("103.00"),
+            "umbral_hidrico": Decimal("51.50"),
             "configuracion_json": {
                 "zone": "boyuibe",
                 "zoneName": "Boyuibe",

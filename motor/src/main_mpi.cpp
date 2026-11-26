@@ -2,6 +2,7 @@
 #include "agrochaco/config.hpp"
 #include "agrochaco/simulation_engine.hpp"
 #include "agrochaco/json_serializer.hpp"
+#include "agrochaco/mpi_runtime.hpp"
 
 #include <mpi.h>
 #include <iostream>
@@ -20,153 +21,148 @@ int main(int argc, char* argv[]) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &processCount);
 
-    int exitCode = 0;
-
     try {
         std::string configFile;
         std::string outputFile;
         std::string csvFile;
-
         int overrideDays = -1;
         int overrideRows = -1;
         int overrideCols = -1;
+        int setupDecision = 0;
 
-        for (int i = 1; i < argc; ++i) {
-            std::string arg = argv[i];
-
-            if (arg == "--help" || arg == "-h") {
-                if (rank == 0) {
-                    std::cout
-                        << "AgroChaco - Motor paralelo MPI\n"
-                        << "Opciones:\n"
-                        << "  --config <archivo.json>\n"
-                        << "  --output <archivo.json>\n"
-                        << "  --csv <archivo.csv>\n"
-                        << "  --days <numero>\n"
-                        << "  --rows <numero>\n"
-                        << "  --cols <numero>\n"
-                        << "Los procesos se especifican con mpirun -np.\n";
-                }
-                MPI_Finalize();
-                return 0;
-            }
-            else if ((arg == "--config" || arg == "-c") && i + 1 < argc) {
-                configFile = argv[++i];
-            }
-            else if ((arg == "--output" || arg == "-o") && i + 1 < argc) {
-                outputFile = argv[++i];
-            }
-            else if (arg == "--csv" && i + 1 < argc) {
-                csvFile = argv[++i];
-            }
-            else if (arg == "--days" && i + 1 < argc) {
-                overrideDays = std::stoi(argv[++i]);
-            }
-            else if (arg == "--rows" && i + 1 < argc) {
-                overrideRows = std::stoi(argv[++i]);
-            }
-            else if (arg == "--cols" && i + 1 < argc) {
-                overrideCols = std::stoi(argv[++i]);
-            }
-            else {
-                if (rank == 0) {
-                    std::cerr << "[ERROR] Argumento desconocido o incompleto: "
-                              << arg << "\n";
-                }
-                exitCode = 1;
-                break;
-            }
-        }
-
-        if (exitCode == 0) {
-            SimulationConfig config;
-
-            if (!configFile.empty()) {
-                config = ConfigLoader::loadFromFile(configFile);
-            } else {
-                config = ConfigLoader::createDefault();
-            }
-
-            if (overrideDays != -1) config.simulationDays = overrideDays;
-            if (overrideRows != -1) config.gridConfig.rows = overrideRows;
-            if (overrideCols != -1) config.gridConfig.cols = overrideCols;
-
-            config.engine = SimulationEngine::MPI;
-            config.mpiProcesses = processCount;
-
-            std::vector<std::string> errors;
-            if (!ConfigValidator::validate(config, errors)) {
-                if (rank == 0) {
-                    std::cerr << "[ERROR] Configuración inválida:\n";
-                    for (const auto& error : errors) {
-                        std::cerr << " - " << error << "\n";
-                    }
-                }
-                exitCode = 2;
-            } else {
-                MpiEngine engine(config);
-
-                if (rank == 0) {
-                    std::cout
-                        << "\nAGROCHACO - MOTOR PARALELO MPI\n"
-                        << "Zona: " << config.zoneName << "\n"
-                        << "Días: " << config.simulationDays << "\n"
-                        << "Malla: " << config.gridConfig.rows << "x"
-                        << config.gridConfig.cols << "\n"
-                        << "Procesos MPI: " << processCount << "\n\n";
-                }
-
-                SimulationResult result = engine.run();
-
-                if (result.status != "completed") {
-                    if (rank == 0) {
-                        std::cerr
-                            << "[ERROR] La simulación no terminó correctamente.\n";
-                    }
-                    exitCode = 3;
-                } else if (rank == 0) {
-                    std::cout << std::fixed << std::setprecision(4)
-                              << "Tiempo MPI: "
-                              << result.executionTimeSeconds << " s\n"
-                              << std::setprecision(3)
-                              << "CWSI promedio: " << result.averageCWSI << "\n"
-                              << std::setprecision(1)
-                              << "Humedad final: "
-                              << result.soilMoistureFinalPercent << " %\n"
-                              << "Déficit hídrico: "
-                              << result.waterDeficitMm << " mm\n"
-                              << "Pérdida de rendimiento: "
-                              << result.yieldLossPercent << " %\n"
-                              << "Rendimiento estimado: "
-                              << result.estimatedYieldTnHa << " tn/ha\n";
-
-                    if (!outputFile.empty()) {
-                        if (!JsonSerializer::saveResultToFile(result, outputFile)) {
-                            std::cerr << "[ERROR] No se pudo guardar el JSON.\n";
-                            exitCode = 4;
-                        } else {
-                            std::cout << "[OK] JSON guardado: "
-                                      << outputFile << "\n";
-                        }
-                    }
-
-                    if (exitCode == 0 && !csvFile.empty()) {
-                        if (!JsonSerializer::exportTimelineToCsv(result, csvFile)) {
-                            std::cerr << "[ERROR] No se pudo guardar el CSV.\n";
-                            exitCode = 5;
-                        } else {
-                            std::cout << "[OK] CSV guardado: "
-                                      << csvFile << "\n";
-                        }
-                    }
+        if (rank == 0) {
+            for (int i = 1; i < argc; ++i) {
+                std::string arg = argv[i];
+                if (arg == "--help" || arg == "-h") {
+                    setupDecision = 1;
+                    break;
+                } else if ((arg == "--config" || arg == "-c") && i + 1 < argc) {
+                    configFile = argv[++i];
+                } else if ((arg == "--output" || arg == "-o") && i + 1 < argc) {
+                    outputFile = argv[++i];
+                } else if (arg == "--csv" && i + 1 < argc) {
+                    csvFile = argv[++i];
+                } else if (arg == "--days" && i + 1 < argc) {
+                    try { overrideDays = std::stoi(argv[++i]); } catch (...) { setupDecision = 2; break; }
+                } else if (arg == "--rows" && i + 1 < argc) {
+                    try { overrideRows = std::stoi(argv[++i]); } catch (...) { setupDecision = 2; break; }
+                } else if (arg == "--cols" && i + 1 < argc) {
+                    try { overrideCols = std::stoi(argv[++i]); } catch (...) { setupDecision = 2; break; }
+                } else {
+                    setupDecision = 2;
+                    break;
                 }
             }
         }
 
-        MPI_Bcast(&exitCode, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        setupDecision = broadcastDecision(MPI_COMM_WORLD, rank, setupDecision);
+        if (setupDecision == 1) {
+            if (rank == 0) {
+                std::cout
+                    << "AgroChaco - Motor paralelo MPI\n"
+                    << "Opciones:\n"
+                    << "  --config <archivo.json>\n"
+                    << "  --output <archivo.json>\n"
+                    << "  --csv <archivo.csv>\n"
+                    << "  --days <numero>\n"
+                    << "  --rows <numero>\n"
+                    << "  --cols <numero>\n"
+                    << "Los procesos se especifican con mpirun -np.\n";
+            }
+            MPI_Finalize();
+            return 0;
+        }
+        if (setupDecision == 2) {
+            if (rank == 0) {
+                std::cerr << "[ERROR] Argumento desconocido o incompleto.\n";
+            }
+            MPI_Finalize();
+            return 2;
+        }
+
+        SimulationConfig config;
+        int loadStatus = 0;
+        if (rank == 0) {
+            try {
+                config = configFile.empty() ? ConfigLoader::createDefault()
+                                            : ConfigLoader::loadFromFile(configFile);
+                if (overrideDays != -1) config.simulationDays = overrideDays;
+                if (overrideRows != -1) config.gridConfig.rows = overrideRows;
+                if (overrideCols != -1) config.gridConfig.cols = overrideCols;
+            } catch (const std::exception& e) {
+                std::cerr << "[ERROR] Fallo al cargar la configuración: " << e.what() << "\n";
+                loadStatus = 1;
+            }
+        }
+
+        loadStatus = broadcastDecision(MPI_COMM_WORLD, rank, loadStatus);
+        if (loadStatus != 0) {
+            MPI_Finalize();
+            return 1;
+        }
+
+        std::string configError;
+        if (!broadcastConfiguration(MPI_COMM_WORLD, rank, config, configError)) {
+            if (rank == 0) {
+                std::cerr << "[ERROR] Configuración MPI divergente o no distribuible: "
+                          << configError << "\n";
+            }
+            MPI_Finalize();
+            return 2;
+        }
+
+        config.engine = SimulationEngine::MPI;
+        config.mpiProcesses = processCount;
+        config.nodesCount = 1;
+
+        int exitCode = 0;
+        MpiEngine engine(config);
+
+        if (rank == 0) {
+            std::cout
+                << "\nAGROCHACO - MOTOR PARALELO MPI\n"
+                << "Zona: " << config.zoneName << "\n"
+                << "Días: " << config.simulationDays << "\n"
+                << "Malla: " << config.gridConfig.rows << "x"
+                << config.gridConfig.cols << "\n"
+                << "Procesos MPI efectivos: " << processCount << "\n"
+                << "Nodos efectivos: 1\n\n";
+        }
+
+        try {
+            const SimulationResult result = engine.run();
+            if (result.status != "completed") {
+                exitCode = 3;
+            } else if (rank == 0) {
+                std::cout << std::fixed << std::setprecision(4)
+                          << "Tiempo MPI: " << result.executionTimeSeconds << " s\n"
+                          << std::setprecision(3)
+                          << "CWSI promedio: " << result.averageCWSI << "\n"
+                          << std::setprecision(1)
+                          << "Humedad final: " << result.soilMoistureFinalPercent << " %\n"
+                          << "Déficit hídrico: " << result.waterDeficitMm << " mm\n"
+                          << "Pérdida de rendimiento: " << result.yieldLossPercent << " %\n"
+                          << "Rendimiento estimado: " << result.estimatedYieldTnHa << " tn/ha\n";
+
+                if (!outputFile.empty() && !JsonSerializer::saveResultToFile(result, outputFile)) {
+                    std::cerr << "[ERROR] No se pudo guardar el JSON.\n";
+                    exitCode = 4;
+                }
+                if (exitCode == 0 && !csvFile.empty() && !JsonSerializer::exportTimelineToCsv(result, csvFile)) {
+                    std::cerr << "[ERROR] No se pudo guardar el CSV.\n";
+                    exitCode = 5;
+                }
+            }
+        } catch (const std::exception& e) {
+            if (rank == 0) {
+                std::cerr << "[ERROR] " << e.what() << "\n";
+            }
+            exitCode = 3;
+        }
+
+        exitCode = broadcastDecision(MPI_COMM_WORLD, rank, exitCode);
         MPI_Finalize();
         return exitCode;
-
     } catch (const std::exception& e) {
         if (rank == 0) {
             std::cerr << "[ERROR] " << e.what() << "\n";

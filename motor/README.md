@@ -2,7 +2,7 @@
 
 **Materia:** TEL420 Sistemas Paralelos (Gestión 2026)  
 **Módulo:** `motor/` — Motores Secuencial, OpenMP, MPI e Híbrido
-**Versión:** 2.0.0 (Motores paralelos, distribuidos y validación de rendimiento)
+**Versión:** 2.1.0 (Motores paralelos, distribuidos, robustez MPI y equivalencia verificada)
 
 ---
 
@@ -35,9 +35,15 @@ Para cada celda de la parcela en el paso diario $t$, con profundidad radicular $
    - $W_{inicial} = (\theta_{t-1} / 100) \times (Z_r \times 1000)$ mm de columna de agua.
    - $P_t$ es la lluvia incidente uniforme en toda la parcela (sin factores multiplicativos arbitrarios).
    - $Drenaje = \max(0, W_{inicial} + P_t - W_{CC})$ es el exceso gravitacional por encima de la Capacidad de Campo ($CC$).
-   - $ET_a = \min(ET_c \times K_s, W_{infiltrada} - W_{PMP})$ es la transpiración real del cultivo.
-   - $\Delta W = W_{final} - W_{inicial}$.
-   - El error de balance $|\Delta W + ET_a + Drenaje - P_t| < 10^{-11}\text{ mm}$ en cada celda y en el promedio de la malla.
+    - $ET_a = \min(ET_c \times K_s, \max(0, W_{infiltrada} - W_{PMP}))$ es la transpiración real del cultivo.
+    - $\Delta W = W_{final} - W_{inicial}$.
+    - Dominio físico exigido: $CC > PMP$, $PMP \le \theta_0 \le CC$, $P_t \ge 0$ y $ET_c \ge 0$. Un estado fuera de ese dominio se rechaza con `std::invalid_argument`; **no se recorta la humedad ni se corrige la precipitación**.
+    - El error de balance $|\Delta W + ET_a + Drenaje - P_t| < 10^{-11}\text{ mm}$ en cada celda y en el promedio de la malla, sin tolerancias hidrolísticas adicionales.
+    - Cada punto de `timelineData` incorpora `waterBalance` con $P_t$, $ET_c$, $ET_a$, drenaje profundo, almacenamiento inicial/final, $\Delta W$, error de balance, profundidad radicular y rebase por profundidad radicular. El resumen estacional se expone en `waterBalanceSummary`.
+    - `surfaceRunoffMm` se serializa como `null`: el modelo mono-capa no calcula escorrentía superficial y no se reporta un cero ficticio.
+    - `rootDepthStorageRebaseMm` cuantifica el cambio del volumen de control cuando crece $Z_r$. No es precipitación, riego ni un flujo de agua; se informa por separado para no presentar la expansión radicular como generación física de agua.
+    - `storageChangeMm` es la suma de $\Delta W$ diarios dentro de cada volumen de control. La diferencia entre `storageFinalMm` y `storageInitialMm` puede incluir rebases por profundidad radicular y no debe interpretarse como un flujo atmosférico.
+
 2. **Coeficiente de estrés hídrico ($K_s$, FAO-56):**
    Con fracción de agotamiento fácilmente utilizable $p = 0.50$:
    $$\theta^* = CC - p \cdot (CC - PMP)$$
@@ -150,19 +156,36 @@ Los resultados incluyen el campo `executionTimeSeconds`.
 
 ---
 
-## 6. Suite de Pruebas Unitarias
+## 6. Suite de Pruebas y Equivalencia Real
 
 Ejecutar:
 
     ./motor/bin/test_motor
+    mpirun -np 3 ./motor/bin/test_motor_mpi
+    python3 motor/tests/run_equivalence_7b3.py
 
 También se puede utilizar CTest:
 
     ctest --test-dir build --output-on-failure
 
-La suite contiene doce pruebas: validación de parámetros, conservación de masa de agua, día sin precipitación, lluvia extrema, ETc igual a cero, sequía prolongada, cálculo de pérdida aditiva ponderada, reproducibilidad secuencial, serialización de métricas opcionales, ausencia de speedup ficticio en motores paralelos, estabilidad numérica de la ecuación de pérdida e independencia respecto del factor varietal.
+La suite local contiene 37 pruebas: validación de entradas, conservación de masa, equivalencia agronómica de los cuatro motores, diagnósticos de balance hídrico, rebase radicular, escorrentía no modelada como `null`, residuo con signo frente a error máximo absoluto, ausencia de resúmenes incompletos, identidad de almacenamiento, consistencia de columnas CSV, identidad del motor secuencial y serialización canónica de configuración. Las comprobaciones usan `REQUIRE` en lugar de `assert`, por lo que también se ejecutan en compilaciones Release con `NDEBUG`.
 
-**Resultado registrado:** 12/12 pruebas aprobadas y CTest con 100 % de éxito.
+La suite MPI real agrega 6 verificaciones ejecutadas con `mpirun`: partición que cubre cada celda una sola vez, reconstrucción completa de la malla, equivalencia híbrida con hilos, convergencia del broadcast de configuración, recursos efectivos de los motores distribuidos y fallo colectivo ante configuración inválida.
+
+La verificación de equivalencia ejecuta los siete casos reales siguientes sobre 20 días y una malla `7x11` no divisible por el número de procesos:
+
+| Caso | Configuración efectiva |
+| :--- | :--- |
+| Secuencial | 1 proceso, referencia declarada `speedup=1.0`, `efficiency=100.0 %` |
+| OpenMP | 2 y 4 hilos |
+| MPI | 2 y 4 procesos |
+| Híbrido | 2 y 4 procesos MPI con 2 hilos OpenMP por proceso |
+
+**Resultado registrado:** 37/37 pruebas locales y 6/6 pruebas MPI reales aprobadas en Debug y Release; CTest `3/3`; equivalencia global `OK`. Las diferencias máximas frente al secuencial fueron `0.000e+00` en indicadores, resumen de balance y malla espacial, y `9.992e-14` en la serie temporal. La identidad `storageFinalMm - storageInitialMm = storageChangeMm + rootDepthStorageRebaseTotalMm` se cumplió con residuo máximo de `1.998e-12 mm`; el residuo diario agregado concordó con su serialización con diferencia máxima de `1.001e-12 mm`.
+
+Las tolerancias declaradas son `1e-6` abs/rel para `CWSI promedio` y `1e-3` absoluta para el resto de indicadores, serie temporal y malla espacial. Los motores paralelos no reportan `speedup` ni eficiencia estimados: solo el motor secuencial declara su línea base. Esta verificación comprueba equivalencia científica, no rendimiento.
+
+**Robustez MPI:** la configuración se serializa de forma canónica en el proceso 0, se distribuye a todos los rangos y se valida de forma colectiva antes de cualquier simulación. Una configuración inválida termina con código `3` en todos los procesos, sin abandono unilateral de collectives. La ejecución de prueba usa supervisión con `start_new_session` y terminación por grupo de proceso para evitar huérfanos si expira un timeout.
 
 ---
 

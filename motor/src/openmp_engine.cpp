@@ -4,6 +4,7 @@
 #include "agrochaco/soil_model.hpp"
 #include "agrochaco/crop_model.hpp"
 #include "agrochaco/grid.hpp"
+#include "agrochaco/water_balance.hpp"
 #include "agrochaco/metrics.hpp"
 #include "agrochaco/config.hpp"
 #include <cmath>
@@ -60,6 +61,7 @@ SimulationResult OpenMPEngine::run() {
     result.config = config_;
     result.config.engine = SimulationEngine::OPENMP;
     result.config.openmpThreads = threadCount;
+    result.config.nodesCount = 1;
     result.status = "running";
     result.progressPercent = 0;
     result.currentDay = 0;
@@ -147,6 +149,19 @@ SimulationResult OpenMPEngine::run() {
         point.cwsi = std::round(lastSummary.averageCwsi * 1000.0) / 1000.0;
         point.soilMoisture = std::round(lastSummary.averageMoisture * 10.0) / 10.0;
         point.precipitation = std::round(lastSummary.averagePrecipitation * 10.0) / 10.0;
+        point.waterBalance = makeWaterBalanceData(
+            lastSummary.averagePrecipitation,
+            lastSummary.averageEtPotential,
+            lastSummary.averageEtActual,
+            lastSummary.averageDeepDrainage,
+            lastSummary.averageInitialStorage,
+            lastSummary.averageFinalStorage,
+            lastSummary.averageFinalStorage - lastSummary.averageInitialStorage,
+            lastSummary.massBalanceError,
+            lastSummary.massBalanceResidualMm,
+            rootDepth * 1000.0,
+            lastSummary.rootDepthStorageRebaseMm
+        );
 
         result.timelineData.push_back(point);
 
@@ -158,6 +173,8 @@ SimulationResult OpenMPEngine::run() {
             progressCallback_(day, config_.simulationDays, lastSummary.averageCwsi);
         }
     }
+
+    result.waterBalanceSummary = makeWaterBalanceSummary(result.timelineData);
 
     timer.stop();
 

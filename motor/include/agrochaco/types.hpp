@@ -132,13 +132,42 @@ struct SimulationConfig {
     std::string plantingDate{"2026-11-15"};
     int simulationDays{120};
     GridConfig gridConfig;
-    double initialMoisturePercent{14.5};
+    double initialMoisturePercent{8.4};
     DroughtScenario droughtScenario{DroughtScenario::EXTREMO_SSP585};
     SimulationEngine engine{SimulationEngine::SECUENCIAL};
     std::optional<int> openmpThreads;
     std::optional<int> mpiProcesses;
     std::optional<int> nodesCount;
     std::string createdAt{""};
+};
+
+struct WaterBalanceData {
+    double precipitationMm{0.0};
+    double etcMm{0.0};
+    double etaMm{0.0};
+    double deepDrainageMm{0.0};
+    std::optional<double> surfaceRunoffMm;
+    double storageInitialMm{0.0};
+    double storageFinalMm{0.0};
+    double storageChangeMm{0.0};
+    double balanceErrorMm{0.0};
+    double balanceResidualMm{0.0};
+    double rootDepthMm{0.0};
+    double rootDepthStorageRebaseMm{0.0};
+};
+
+struct WaterBalanceSummary {
+    double precipitationTotalMm{0.0};
+    double etcTotalMm{0.0};
+    double etaTotalMm{0.0};
+    double deepDrainageTotalMm{0.0};
+    std::optional<double> surfaceRunoffTotalMm;
+    double storageInitialMm{0.0};
+    double storageFinalMm{0.0};
+    double storageChangeMm{0.0};
+    double maxDailyBalanceErrorMm{0.0};
+    double massBalanceResidualMm{0.0};
+    double rootDepthStorageRebaseTotalMm{0.0};
 };
 
 // Punto de la serie temporal (resultado diario agregado)
@@ -151,6 +180,7 @@ struct TimelineDataPoint {
     double cwsi{0.0};           // Crop Water Stress Index [0, 1]
     double soilMoisture{0.0};   // % volumétrico
     double precipitation{0.0};  // mm/día
+    std::optional<WaterBalanceData> waterBalance;
 };
 
 // Celda espacial resultante para el mapa de calor
@@ -199,6 +229,7 @@ struct SimulationResult {
     double nominalYieldTnHa{0.0};
     double waterDeficitMm{0.0};
     double memoryUsageMb{0.0};
+    std::optional<WaterBalanceSummary> waterBalanceSummary;
     std::vector<TimelineDataPoint> timelineData;
     std::vector<SpatialCell> spatialGrid;
     std::vector<SimulationLog> logs;

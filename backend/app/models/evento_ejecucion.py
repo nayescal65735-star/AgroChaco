@@ -31,7 +31,6 @@ class EventoEjecucion(Base):
         String(36),
         ForeignKey("simulaciones.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     fecha_hora = Column(
         DateTime(timezone=True),

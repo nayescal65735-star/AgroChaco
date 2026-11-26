@@ -2,6 +2,7 @@
 #define AGROCHACO_SOIL_MODEL_HPP
 
 #include "types.hpp"
+#include <stdexcept>
 
 namespace agrochaco {
 
@@ -12,21 +13,29 @@ public:
         double updatedMoisturePercent; // Humedad final del día (%)
         double etActual;               // mm/día
         double cwsi;                   // Índice de déficit relativo [0, 1]
-        double deepDrainage;           // Exceso percolado / escorrentía gravitacional (mm)
+        double deepDrainage;           // Exceso percolado profundo (mm)
         double deficitMm;              // Déficit diario ETc - ETa (mm)
         double initialWaterMm;         // Agua inicial en zona radicular (mm)
         double finalWaterMm;           // Agua final en zona radicular (mm)
         double deltaStorageMm;         // Cambio de almacenamiento: finalWaterMm - initialWaterMm (mm)
-        double massBalanceError;       // Error de masa: |deltaStorageMm + etActual + deepDrainage - precipitation| (mm)
+        double massBalanceError;       // Error absoluto: |deltaStorageMm + etActual + deepDrainage - precipitation| (mm)
+        double massBalanceResidualMm;  // Residuo con signo: deltaStorageMm + etActual + deepDrainage - precipitation (mm)
     };
 
     /**
+     * Rechaza forzamientos climáticos físicamente inválidos antes de cualquier cálculo.
+     * @throws std::invalid_argument si ETc o precipitación son negativos o no finitos.
+     */
+    static void validateForcing(double etPotential, double precipitation);
+
+    /**
      * Calcula el balance hídrico diario para una celda de suelo con conservación estricta de masa.
-     * @param currentMoisture Humedad actual (% volumétrico)
-     * @param soil Propiedades edáficas (CC, PMP, agua útil)
-     * @param etPotential Demanda evaporativa del cultivo ETc (mm)
-     * @param precipitation Precipitación incidente uniforme (mm)
-     * @param rootDepthMeters Profundidad radicular activa (m)
+     * No corrige estados inválidos: los rechaza explícitamente con std::invalid_argument.
+     * @param currentMoisture Humedad actual (% volumétrico), debe estar en [PMP, CC]
+     * @param soil Propiedades edáficas (CC, PMP, agua útil), con CC > PMP
+     * @param etPotential Demanda evaporativa del cultivo ETc (mm), >= 0
+     * @param precipitation Precipitación incidente uniforme (mm), >= 0
+     * @param rootDepthMeters Profundidad radicular activa (m), > 0.05
      * @return Resultado del balance diario con balance de masa
      */
     static CellBalanceResult updateCellMoisture(

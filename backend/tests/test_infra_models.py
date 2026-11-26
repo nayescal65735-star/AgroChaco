@@ -121,9 +121,9 @@ def test_insertion_and_relationships(db_session):
 
     param = Parametro(
         simulacion=sim,
-        agua_inicial=Decimal("22.50"),
-        capacidad_suelo=Decimal("120.00"),
-        umbral_hidrico=Decimal("60.00"),
+        agua_inicial=Decimal("18.50"),
+        capacidad_suelo=Decimal("103.00"),
+        umbral_hidrico=Decimal("51.50"),
         configuracion_json={
             "zone": "yacuiba",
             "soilType": "franco_arenoso",
@@ -176,7 +176,7 @@ def test_insertion_and_relationships(db_session):
     loaded_sim = db_session.get(Simulacion, sim_id)
     assert loaded_sim is not None
     assert loaded_sim.nombre == "Test Cultivo Maíz Yacuiba"
-    assert loaded_sim.parametro.capacidad_suelo == Decimal("120.00")
+    assert loaded_sim.parametro.capacidad_suelo == Decimal("103.00")
     assert loaded_sim.parametro.configuracion_json["zone"] == "yacuiba"
     assert loaded_sim.resultado.deficit_maximo == Decimal("0.7812")
     assert len(loaded_sim.rendimientos) == 1
@@ -207,7 +207,7 @@ def test_cascade_delete(db_session):
         agua_inicial=Decimal("15.00"),
         capacidad_suelo=Decimal("100.00"),
         umbral_hidrico=Decimal("50.00"),
-        configuracion_json={"zone": "villamontes"},
+        configuracion_json={"zone": "villamontes", "soilType": "franco_arenoso"},
     )
     Resultado(
         simulacion=sim,

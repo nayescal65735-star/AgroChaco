@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from app.db.database import SessionLocal
 from app.db.repository import SimulationRepository
 from app.models import SimulationJob
+from app.models.parametro import sincronizar_humedad_json
 from app.services.motor_service import (
     MotorExecutionError,
     MotorNotFoundError,
@@ -514,7 +515,7 @@ class SimulationWorker:
         configuracion = simulacion.parametro.configuracion_json
         if not isinstance(configuracion, dict):
             raise ValueError("Configuración JSON inválida")
-        return configuracion
+        return sincronizar_humedad_json(configuracion, simulacion.parametro.agua_inicial)
 
     def _crear_temporal(self, sim_id: str, proposito: str) -> Path:
         fd, nombre = tempfile.mkstemp(

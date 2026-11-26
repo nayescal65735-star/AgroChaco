@@ -17,6 +17,9 @@ public:
     // Exporta la serie temporal a formato CSV estándar
     static bool exportTimelineToCsv(const SimulationResult& result, const std::string& filePath);
 
+    // Serialización canónica de configuración para distribución MPI
+    static std::string serializeConfig(const SimulationConfig& config);
+
     // Parser liviano para configuración en formato JSON
     static SimulationConfig parseConfig(const std::string& jsonContent);
 };

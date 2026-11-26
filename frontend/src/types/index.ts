@@ -119,6 +119,33 @@ export interface SimulationConfig {
   createdAt: string;
 }
 
+export interface WaterBalanceData {
+  precipitationMm: number;
+  etcMm: number;
+  etaMm: number;
+  deepDrainageMm: number;
+  surfaceRunoffMm: number | null;
+  storageInitialMm: number;
+  storageFinalMm: number;
+  storageChangeMm: number;
+  balanceErrorMm: number;
+  rootDepthMm: number;
+  rootDepthStorageRebaseMm: number;
+}
+
+export interface WaterBalanceSummary {
+  precipitationTotalMm: number;
+  etcTotalMm: number;
+  etaTotalMm: number;
+  deepDrainageTotalMm: number;
+  surfaceRunoffTotalMm: number | null;
+  storageInitialMm: number;
+  storageFinalMm: number;
+  storageChangeMm: number;
+  maxDailyBalanceErrorMm: number;
+  rootDepthStorageRebaseTotalMm: number;
+}
+
 export interface TimelineDataPoint {
   day: number;
   date: string;
@@ -128,6 +155,7 @@ export interface TimelineDataPoint {
   cwsi: number;            // Crop Water Stress Index (0 a 1)
   soilMoisture: number;    // %
   precipitation: number;   // mm
+  waterBalance?: WaterBalanceData | null;
 }
 
 export interface SpatialCell {
@@ -156,6 +184,7 @@ export interface SimulationResult {
   nominalYieldTnHa?: number;
   waterDeficitMm?: number;
   memoryUsageMb?: number;
+  waterBalanceSummary?: WaterBalanceSummary | null;
   timelineData: TimelineDataPoint[];
   spatialGrid: SpatialCell[];
   logs: SimulationLog[];

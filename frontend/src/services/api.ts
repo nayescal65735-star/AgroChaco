@@ -5,13 +5,14 @@ import type {
   SimulationConfig,
   SimulationStatus,
   TimelineDataPoint,
+  WaterBalanceSummary,
   SpatialCell,
   SimulationLog,
   SimulationJob,
   ExecuteSimulationResponse,
 } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001';
 const intervaloConfigurado = Number(import.meta.env.VITE_JOB_POLL_INTERVAL_MS);
 
 export const JOB_POLL_INTERVAL_MS =
@@ -47,6 +48,7 @@ export interface BackendSimulation {
   nominalYieldTnHa?: number;
   waterDeficitMm?: number;
   memoryUsageMb?: number;
+  waterBalanceSummary?: WaterBalanceSummary | null;
 
   timelineData?: TimelineDataPoint[];
   spatialGrid?: SpatialCell[];

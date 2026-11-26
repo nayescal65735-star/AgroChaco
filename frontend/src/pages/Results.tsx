@@ -52,6 +52,10 @@ function mensajeErrorExportacion(error: unknown, formato: string): string {
   return `No se pudo exportar ${formato}. Verifique que la simulación exista y que el backend esté disponible.${detalle}`;
 }
 
+function formatearMm(valor: number | null | undefined): string {
+  return valor == null ? 'No disponible' : `${valor.toFixed(3)} mm`;
+}
+
 export function Results() {
   const { simulations, activeSimulation, setActiveSimulationId } = useSimulations();
   const navigate = useNavigate();
@@ -401,6 +405,91 @@ export function Results() {
         <div style={{ marginTop: '0.85rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
           Etapas y Kc de referencia del modelo; la serie mostrada arriba corresponde a la corrida seleccionada.
         </div>
+      </Card>
+
+      <Card
+        className="mb-6"
+        title="Auditoría del Balance Hídrico Diario"
+        subtitle="Identidad verificada: ΔAlmacenamiento + ETa + Drenaje profundo = Precipitación"
+      >
+        {currentSim.waterBalanceSummary ? (
+          <>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: '0.75rem',
+                marginBottom: '1rem',
+              }}
+            >
+              <div style={{ padding: '0.75rem', background: 'var(--bg-main)', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>Precipitación total</div>
+                <div style={{ fontSize: '1rem', fontWeight: 700 }}>{formatearMm(currentSim.waterBalanceSummary.precipitationTotalMm)}</div>
+              </div>
+              <div style={{ padding: '0.75rem', background: 'var(--bg-main)', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>ETa / ETc total</div>
+                <div style={{ fontSize: '1rem', fontWeight: 700 }}>
+                  {formatearMm(currentSim.waterBalanceSummary.etaTotalMm)} / {formatearMm(currentSim.waterBalanceSummary.etcTotalMm)}
+                </div>
+              </div>
+              <div style={{ padding: '0.75rem', background: 'var(--bg-main)', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>Drenaje profundo</div>
+                <div style={{ fontSize: '1rem', fontWeight: 700 }}>{formatearMm(currentSim.waterBalanceSummary.deepDrainageTotalMm)}</div>
+              </div>
+              <div style={{ padding: '0.75rem', background: 'var(--bg-main)', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>Error máximo diario</div>
+                <div style={{ fontSize: '1rem', fontWeight: 700 }}>{formatearMm(currentSim.waterBalanceSummary.maxDailyBalanceErrorMm)}</div>
+              </div>
+              <div style={{ padding: '0.75rem', background: 'var(--bg-main)', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 700 }}>Rebase por profundidad radicular</div>
+                <div style={{ fontSize: '1rem', fontWeight: 700 }}>{formatearMm(currentSim.waterBalanceSummary.rootDepthStorageRebaseTotalMm)}</div>
+              </div>
+            </div>
+
+            <div style={{ overflowX: 'auto', maxHeight: '320px', border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
+                <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-main)' }}>
+                  <tr>
+                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>Día</th>
+                    <th style={{ padding: '0.5rem', textAlign: 'right' }}>P</th>
+                    <th style={{ padding: '0.5rem', textAlign: 'right' }}>ETc</th>
+                    <th style={{ padding: '0.5rem', textAlign: 'right' }}>ETa</th>
+                    <th style={{ padding: '0.5rem', textAlign: 'right' }}>Drenaje</th>
+                    <th style={{ padding: '0.5rem', textAlign: 'right' }}>ΔS</th>
+                    <th style={{ padding: '0.5rem', textAlign: 'right' }}>Error</th>
+                    <th style={{ padding: '0.5rem', textAlign: 'right' }}>Rebase radicular</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {currentSim.timelineData.map((point) => {
+                    const balance = point.waterBalance;
+                    if (!balance) return null;
+                    return (
+                      <tr key={point.day} style={{ borderTop: '1px solid var(--border-light)' }}>
+                        <td style={{ padding: '0.4rem 0.5rem' }}>{point.day}</td>
+                        <td style={{ padding: '0.4rem 0.5rem', textAlign: 'right' }}>{balance.precipitationMm.toFixed(3)}</td>
+                        <td style={{ padding: '0.4rem 0.5rem', textAlign: 'right' }}>{balance.etcMm.toFixed(3)}</td>
+                        <td style={{ padding: '0.4rem 0.5rem', textAlign: 'right' }}>{balance.etaMm.toFixed(3)}</td>
+                        <td style={{ padding: '0.4rem 0.5rem', textAlign: 'right' }}>{balance.deepDrainageMm.toFixed(3)}</td>
+                        <td style={{ padding: '0.4rem 0.5rem', textAlign: 'right' }}>{balance.storageChangeMm.toFixed(3)}</td>
+                        <td style={{ padding: '0.4rem 0.5rem', textAlign: 'right' }}>{balance.balanceErrorMm.toFixed(3)}</td>
+                        <td style={{ padding: '0.4rem 0.5rem', textAlign: 'right' }}>{balance.rootDepthStorageRebaseMm.toFixed(3)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ marginTop: '0.85rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              Escorrentía superficial: {formatearMm(currentSim.waterBalanceSummary.surfaceRunoffTotalMm)} (proceso no modelado). ΔS es la suma diaria dentro de cada volumen de control; el rebase por profundidad radicular cambia ese volumen y no es una entrada de agua ni precipitación.
+            </div>
+          </>
+        ) : (
+          <div style={{ padding: '1rem', background: 'var(--bg-main)', borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+            No hay diagnósticos de balance hídrico disponibles para esta corrida. Los valores no se sustituyen por cero.
+          </div>
+        )}
       </Card>
 
       {/* Two Column Layout: Spatial Grid Heatmap & Agronomic Details */}

@@ -5,6 +5,7 @@
 #include "agrochaco/soil_model.hpp"
 #include "agrochaco/crop_model.hpp"
 #include "agrochaco/grid.hpp"
+#include "agrochaco/water_balance.hpp"
 #include "agrochaco/metrics.hpp"
 #include "agrochaco/config.hpp"
 #include <cmath>
@@ -67,6 +68,7 @@ SimulationResult HybridEngine::run() {
     result.config.engine = SimulationEngine::HIBRIDO;
     result.config.mpiProcesses = processCount;
     result.config.openmpThreads = threadCount;
+    result.config.nodesCount = 1;
     result.status = "running";
     result.progressPercent = 0;
     result.currentDay = 0;
@@ -76,8 +78,12 @@ SimulationResult HybridEngine::run() {
 
     // 1. Validación de consistencia de configuración
     std::vector<std::string> errors;
-    if (!ConfigValidator::validate(config_, errors)) {
-        log(result.logs, LogLevel::ERROR, "Fallo de validación en parámetros de configuración");
+    const bool localValid = ConfigValidator::validate(config_, errors);
+    int localValidInt = localValid ? 1 : 0;
+    int globalValidInt = 1;
+    MPI_Allreduce(&localValidInt, &globalValidInt, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+    if (globalValidInt == 0) {
+        log(result.logs, LogLevel::ERROR, "Fallo colectivo de validación en parámetros de configuración");
         for (const auto& err : errors) {
             log(result.logs, LogLevel::ERROR, err);
         }
@@ -155,6 +161,19 @@ SimulationResult HybridEngine::run() {
         point.cwsi = std::round(lastSummary.averageCwsi * 1000.0) / 1000.0;
         point.soilMoisture = std::round(lastSummary.averageMoisture * 10.0) / 10.0;
         point.precipitation = std::round(lastSummary.averagePrecipitation * 10.0) / 10.0;
+        point.waterBalance = makeWaterBalanceData(
+            lastSummary.averagePrecipitation,
+            lastSummary.averageEtPotential,
+            lastSummary.averageEtActual,
+            lastSummary.averageDeepDrainage,
+            lastSummary.averageInitialStorage,
+            lastSummary.averageFinalStorage,
+            lastSummary.averageFinalStorage - lastSummary.averageInitialStorage,
+            lastSummary.massBalanceError,
+            lastSummary.massBalanceResidualMm,
+            rootDepth * 1000.0,
+            lastSummary.rootDepthStorageRebaseMm
+        );
 
         result.timelineData.push_back(point);
 
@@ -168,6 +187,7 @@ SimulationResult HybridEngine::run() {
     }
 
     // Reconstruir la malla espacial completa en todos los procesos.
+    result.waterBalanceSummary = makeWaterBalanceSummary(result.timelineData);
     grid.synchronizeForMPI(rank, processCount);
 
     const double localElapsed = MPI_Wtime() - mpiStart;

@@ -5,6 +5,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -25,9 +26,8 @@ class Rendimiento(Base):
         String(36),
         ForeignKey("simulaciones.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    modalidad = Column(String(20), nullable=False, index=True)
+    modalidad = Column(String(20), nullable=False)
     hilos = Column(Integer, nullable=False, default=1, server_default=text("1"))
     procesos = Column(Integer, nullable=False, default=1, server_default=text("1"))
     nodos = Column(Integer, nullable=False, default=1, server_default=text("1"))
@@ -56,6 +56,8 @@ class Rendimiento(Base):
         CheckConstraint("speedup >= 0", name="chk_rendimiento_speedup"),
         CheckConstraint("eficiencia >= 0", name="chk_rendimiento_eficiencia"),
         CheckConstraint("repeticion >= 1", name="chk_rendimiento_repeticion"),
+        Index("idx_rendimiento_simulacion_id", simulacion_id),
+        Index("idx_rendimiento_modalidad", modalidad),
     )
 
     simulacion = relationship("Simulacion", back_populates="rendimientos")

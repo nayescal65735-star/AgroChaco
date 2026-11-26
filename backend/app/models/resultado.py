@@ -5,9 +5,11 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.orm import relationship
@@ -25,8 +27,6 @@ class Resultado(Base):
         String(36),
         ForeignKey("simulaciones.id", ondelete="CASCADE"),
         nullable=False,
-        unique=True,
-        index=True,
     )
     deficit_medio = Column(Numeric(8, 4), nullable=False)
     deficit_maximo = Column(Numeric(8, 4), nullable=False)
@@ -53,6 +53,8 @@ class Resultado(Base):
             "escenarios_con_deficit >= 0",
             name="chk_resultados_escenarios_con_deficit",
         ),
+        UniqueConstraint("simulacion_id"),
+        Index("idx_resultados_simulacion_id", simulacion_id, unique=True),
     )
 
     simulacion = relationship("Simulacion", back_populates="resultado")

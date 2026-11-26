@@ -23,6 +23,12 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.db.repository import SimulationRepository
+from app.models.parametro import (
+    canonizar_humedad_inicial,
+    soil_moisture_limits,
+    validar_humedad_inicial,
+    validar_soil_type,
+)
 
 logger = logging.getLogger("agrochaco.motor_service")
 
@@ -159,6 +165,13 @@ class MotorService:
         rows = int(grid_config.get("rows", config_dict.get("rows", 100)))
         cols = int(grid_config.get("cols", config_dict.get("cols", 100)))
         cell_size = float(grid_config.get("cellSizeMeters", config_dict.get("cellSizeMeters", 50.0)))
+        soil_type = validar_soil_type(config_dict.get("soilType"))
+        soil_low, soil_high = soil_moisture_limits(soil_type)
+        default_moisture = float((soil_low + soil_high) / Decimal(2))
+        humedad = canonizar_humedad_inicial(
+            config_dict.get("initialMoisturePercent", default_moisture)
+        )
+        validar_humedad_inicial(humedad, soil_type)
 
         config_normalizada: dict[str, Any] = {
             "id": sim_id_seguro,
@@ -167,11 +180,11 @@ class MotorService:
             "zone": config_dict.get("zone", "yacuiba"),
             "zoneName": config_dict.get("zoneName", "Yacuiba"),
             "department": config_dict.get("department", "Tarija"),
-            "soilType": config_dict.get("soilType", "franco_arenoso"),
+            "soilType": soil_type,
             "cornVariety": config_dict.get("cornVariety", "iniaf_h1"),
             "plantingDate": str(config_dict.get("plantingDate", "2026-11-20")),
             "simulationDays": int(config_dict.get("simulationDays", 120)),
-            "initialMoisturePercent": float(config_dict.get("initialMoisturePercent", 18.0)),
+            "initialMoisturePercent": float(humedad),
             "droughtScenario": config_dict.get("droughtScenario", "moderado_ssp245"),
             "engine": config_dict.get("engine", "secuencial"),
             "rows": rows,
@@ -466,13 +479,21 @@ class MotorService:
             output_data.get("efficiency"), is_efficiency=True
         )
 
+        effective_config = output_data.get("config") or {}
+
+        def valor_efectivo(clave):
+            valor = effective_config.get(clave)
+            return valor if valor is not None else config_dict.get(clave)
+
+        engine = str(valor_efectivo("engine") or engine).lower()
+
         hilos = 1
         procesos = 1
         if engine in ("openmp", "hibrido"):
-            hilos = int(config_dict.get("openmpThreads") or 1)
+            hilos = int(valor_efectivo("openmpThreads") or 1)
         if engine in ("mpi", "hibrido"):
-            procesos = int(config_dict.get("mpiProcesses") or 1)
-        nodos = int(config_dict.get("nodesCount") or 1)
+            procesos = int(valor_efectivo("mpiProcesses") or 1)
+        nodos = int(valor_efectivo("nodesCount") or 1)
 
         datos_rendimiento = {
             "modalidad": engine,

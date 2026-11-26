@@ -84,6 +84,7 @@ def test_crear_simulacion_con_parametros_exitoso(db_session):
         "configuracion_json": {
             "zone": "yacuiba",
             "department": "Tarija",
+            "soilType": "franco",
             "cornVariety": "chaco_01_criollo",
         },
     }
@@ -118,7 +119,7 @@ def test_rollback_ante_error_en_parametros(db_session):
         "agua_inicial": Decimal("20.00"),
         "capacidad_suelo": Decimal("0.00"),  # CHECK Violation
         "umbral_hidrico": Decimal("50.00"),
-        "configuracion_json": {},
+        "configuracion_json": {"soilType": "franco"},
     }
 
     with pytest.raises(RuntimeError) as exc_info:
@@ -251,7 +252,7 @@ def test_eliminar_simulacion(db_session):
             "agua_inicial": Decimal("10.00"),
             "capacidad_suelo": Decimal("80.00"),
             "umbral_hidrico": Decimal("40.00"),
-            "configuracion_json": {},
+            "configuracion_json": {"soilType": "franco_arenoso"},
         },
     )
 
@@ -283,7 +284,7 @@ def test_rendimiento_acepta_metricas_hpc_null(db_session):
             "agua_inicial": Decimal("18.00"),
             "capacidad_suelo": Decimal("100.00"),
             "umbral_hidrico": Decimal("50.00"),
-            "configuracion_json": {"engine": "openmp"},
+            "configuracion_json": {"engine": "openmp", "soilType": "franco_arenoso"},
         },
     )
 

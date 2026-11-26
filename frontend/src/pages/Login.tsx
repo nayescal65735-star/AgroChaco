@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context';
+import { API_BASE_URL } from '../services/api';
 import { DEMO_USERS } from '../services/mockData';
 import { Sprout, Server, ShieldCheck, ArrowRight, BookOpen, AlertCircle } from 'lucide-react';
 
@@ -300,7 +301,7 @@ export function Login() {
               color: 'var(--text-muted)',
             }}
           >
-            Backend FastAPI: <code>http://localhost:8000</code> • PostgreSQL 16
+            Backend FastAPI: <code>{API_BASE_URL}</code> • PostgreSQL 16
           </div>
         </div>
       </div>

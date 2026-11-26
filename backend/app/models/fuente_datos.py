@@ -5,6 +5,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     ForeignKey,
+    Index,
     String,
     Text,
 )
@@ -23,11 +24,10 @@ class FuenteDatos(Base):
         String(36),
         ForeignKey("simulaciones.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     nombre_archivo = Column(String(255), nullable=False)
     formato = Column(String(20), nullable=False)
-    hash_archivo = Column(String(64), nullable=False, index=True)
+    hash_archivo = Column(String(64), nullable=False)
     periodo = Column(String(50), nullable=True)
     descripcion = Column(Text, nullable=True)
 
@@ -36,6 +36,8 @@ class FuenteDatos(Base):
             "formato IN ('csv', 'json', 'netcdf', 'geotiff', 'txt')",
             name="chk_fuentes_formato",
         ),
+        Index("idx_fuentes_simulacion_id", simulacion_id),
+        Index("idx_fuentes_hash", hash_archivo),
     )
 
     simulacion = relationship("Simulacion", back_populates="fuentes_datos")

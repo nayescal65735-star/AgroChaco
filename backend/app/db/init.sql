@@ -39,7 +39,17 @@ CREATE INDEX IF NOT EXISTS idx_simulaciones_escenario
 CREATE TABLE IF NOT EXISTS parametros (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     simulacion_id VARCHAR(36) NOT NULL UNIQUE,
-    agua_inicial NUMERIC(8, 2) NOT NULL CHECK (agua_inicial >= 0),
+    agua_inicial NUMERIC(8, 2) NOT NULL CHECK (
+        configuracion_json->>'soilType' IN
+            ('franco_arenoso', 'franco_arcilloso', 'arenoso', 'franco')
+        AND agua_inicial >= 0 AND agua_inicial <= 100
+        AND (CASE configuracion_json->>'soilType'
+            WHEN 'franco_arenoso' THEN agua_inicial BETWEEN 8.20 AND 18.50
+            WHEN 'franco_arcilloso' THEN agua_inicial BETWEEN 17.50 AND 31.00
+            WHEN 'arenoso' THEN agua_inicial BETWEEN 4.80 AND 12.00
+            WHEN 'franco' THEN agua_inicial BETWEEN 11.00 AND 24.00
+            ELSE 1 = 0 END)
+    ),
     capacidad_suelo NUMERIC(8, 2) NOT NULL CHECK (capacidad_suelo > 0),
     umbral_hidrico NUMERIC(8, 2) NOT NULL CHECK (umbral_hidrico >= 0),
     configuracion_json JSONB NOT NULL,

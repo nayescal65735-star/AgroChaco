@@ -12,6 +12,9 @@ public:
     // Valida la configuración y retorna true si es válida.
     // Llena la lista errors con los mensajes explicativos de cualquier anomalía.
     static bool validate(const SimulationConfig& config, std::vector<std::string>& errors);
+
+    // Valida un par (ETc, precipitación) antes de que el motor lo use o lo reporte.
+    static bool validateForcing(double etPotential, double precipitation, std::vector<std::string>& errors);
 };
 
 class ConfigLoader {

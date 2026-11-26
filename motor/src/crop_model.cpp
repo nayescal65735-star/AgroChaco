@@ -1,5 +1,7 @@
 #include "agrochaco/crop_model.hpp"
 #include <algorithm>
+#include <cmath>
+#include <stdexcept>
 
 namespace agrochaco {
 
@@ -22,8 +24,12 @@ double CropModel::calculateRootDepth(int day, int cycleDays) {
 }
 
 double CropModel::calculateEtc(double et0, double kc) {
-    if (et0 < 0.0) et0 = 0.0;
-    if (kc < 0.0) kc = 0.0;
+    if (!std::isfinite(et0) || et0 < 0.0) {
+        throw std::invalid_argument("ET0 debe ser finita y no negativa.");
+    }
+    if (!std::isfinite(kc) || kc < 0.0) {
+        throw std::invalid_argument("El coeficiente Kc debe ser finito y no negativo.");
+    }
     return et0 * kc;
 }
 

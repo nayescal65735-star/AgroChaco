@@ -33,6 +33,8 @@ from app.workers.simulation_worker import (
 CONFIG_BASE = {
     "engine": "secuencial",
     "simulationDays": 10,
+    "soilType": "franco_arenoso",
+    "initialMoisturePercent": 18.0,
     "gridConfig": {"rows": 2, "cols": 2, "cellSizeMeters": 50.0},
 }
 

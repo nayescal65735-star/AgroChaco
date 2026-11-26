@@ -1,11 +1,25 @@
 #include "agrochaco/config.hpp"
 #include "agrochaco/agronomic_data.hpp"
+#include "agrochaco/crop_model.hpp"
 #include "agrochaco/json_serializer.hpp"
+#include "agrochaco/soil_model.hpp"
+#include <cmath>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 
 namespace agrochaco {
+
+bool ConfigValidator::validateForcing(double etPotential, double precipitation, std::vector<std::string>& errors) {
+    errors.clear();
+    try {
+        SoilModel::validateForcing(etPotential, precipitation);
+    } catch (const std::exception& e) {
+        errors.push_back(e.what());
+        return false;
+    }
+    return true;
+}
 
 bool ConfigValidator::validate(const SimulationConfig& config, std::vector<std::string>& errors) {
     errors.clear();
@@ -32,41 +46,74 @@ bool ConfigValidator::validate(const SimulationConfig& config, std::vector<std::
         errors.push_back("Los días de simulación no pueden superar un ciclo anual completo (máximo 365 días).");
     }
 
-    // 3. Validación de humedad inicial
-    if (config.initialMoisturePercent < 0.0 || config.initialMoisturePercent > 100.0) {
-        errors.push_back("La humedad inicial del suelo debe encontrarse entre 0% y 100%.");
+    // 3. La humedad inicial debe ser un número físico; el rango edáfico se valida en el paso 4.
+    if (!std::isfinite(config.initialMoisturePercent)) {
+        errors.push_back("La humedad inicial del suelo debe ser un valor finito.");
     }
 
-    // 4. Validación de consistencia edáfica
+    // 4. Validación de consistencia edáfica: PMP <= theta0 <= CC.
     try {
         const auto& soil = AgronomicData::getSoil(config.soilType);
-        if (soil.fieldCapacity <= soil.wiltingPoint) {
+        if (!std::isfinite(soil.fieldCapacity) || !std::isfinite(soil.wiltingPoint) ||
+            soil.fieldCapacity <= soil.wiltingPoint) {
             errors.push_back("Inconsistencia en el suelo: la Capacidad de Campo (" +
                              std::to_string(soil.fieldCapacity) +
                              "%) debe ser mayor al Punto de Marchitez (" +
                              std::to_string(soil.wiltingPoint) + "%).");
-        }
-        if (config.initialMoisturePercent < soil.wiltingPoint * 0.5) {
-            errors.push_back("Advertencia crítica: La humedad inicial está severamente por debajo del punto de marchitez permanente.");
+        } else {
+            if (config.initialMoisturePercent < soil.wiltingPoint ||
+                config.initialMoisturePercent > soil.fieldCapacity) {
+                errors.push_back(
+                    "La humedad inicial (" + std::to_string(config.initialMoisturePercent) +
+                    "%) debe estar entre el PMP (" + std::to_string(soil.wiltingPoint) +
+                    "%) y la Capacidad de Campo (" + std::to_string(soil.fieldCapacity) + "%)."
+                );
+            }
         }
     } catch (const std::exception& e) {
         errors.push_back(std::string("Error al validar el tipo de suelo: ") + e.what());
     }
 
     // 5. Validación de variedad y zona
+    bool zoneValid = false;
     try {
         AgronomicData::getZone(config.zone);
+        zoneValid = true;
     } catch (const std::exception& e) {
         errors.push_back(std::string("Error al validar la zona: ") + e.what());
     }
 
+    bool varietyValid = false;
     try {
         AgronomicData::getCornVariety(config.cornVariety);
+        varietyValid = true;
     } catch (const std::exception& e) {
         errors.push_back(std::string("Error al validar la variedad de maíz: ") + e.what());
     }
 
-    // 6. Validación de concurrencia si aplican
+    // 6. Validación de forzamientos climáticos diarios (ETc y precipitación).
+    if (zoneValid && varietyValid && config.simulationDays > 0) {
+        try {
+            const auto& variety = AgronomicData::getCornVariety(config.cornVariety);
+            for (int day = 1; day <= config.simulationDays; ++day) {
+                const auto climate = AgronomicData::getDailyClimate(day, config.zone, config.droughtScenario);
+                const auto pheno = AgronomicData::getPhenology(day, variety.cycleDays);
+                const double etc = CropModel::calculateEtc(climate.et0, pheno.kc);
+
+                std::vector<std::string> forcingErrors;
+                if (!validateForcing(etc, climate.precipitation, forcingErrors)) {
+                    for (const auto& message : forcingErrors) {
+                        errors.push_back("Día " + std::to_string(day) + ": " + message);
+                    }
+                    break;
+                }
+            }
+        } catch (const std::exception& e) {
+            errors.push_back(std::string("Error al validar el forzamiento climático: ") + e.what());
+        }
+    }
+
+    // 7. Validación de concurrencia si aplican
     if (config.openmpThreads.has_value() && config.openmpThreads.value() <= 0) {
         errors.push_back("El número de hilos OpenMP debe ser mayor a cero.");
     }
@@ -109,7 +156,7 @@ SimulationConfig ConfigLoader::createDefault() {
     config.gridConfig.rows = 20;
     config.gridConfig.cols = 20;
     config.gridConfig.cellSizeMeters = 50.0;
-    config.initialMoisturePercent = 14.5;
+    config.initialMoisturePercent = 8.4;
     config.droughtScenario = DroughtScenario::EXTREMO_SSP585;
     config.engine = SimulationEngine::SECUENCIAL;
     config.createdAt = "2026-11-10 12:00";

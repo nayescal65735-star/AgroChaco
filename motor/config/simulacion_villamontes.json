@@ -14,7 +14,7 @@
     "cols": 40,
     "cellSizeMeters": 50.0
   },
-  "initialMoisturePercent": 14.5,
+  "initialMoisturePercent": 8.4,
   "droughtScenario": "extremo_ssp585",
   "engine": "secuencial",
   "createdAt": "2026-11-10 12:00:00"
