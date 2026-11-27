@@ -18,6 +18,7 @@ from app.models.rendimiento import Rendimiento
 from app.models.resultado import Resultado
 from app.models.simulacion import Simulacion
 from app.models.simulation_job import SimulationJob
+from app.models.trazabilidad import ParametroHistorico, RecalibracionSimulacion
 
 __all__ = [
     "Base",
@@ -28,5 +29,7 @@ __all__ = [
     "FuenteDatos",
     "EventoEjecucion",
     "SimulationJob",
+    "ParametroHistorico",
+    "RecalibracionSimulacion",
 ]
 

@@ -5,6 +5,9 @@ import {
   GRAN_CHACO_ZONES,
   SOIL_INFOS,
   CORN_VARIETIES,
+  ajustarHumedadInicial,
+  humedadDentroDeLimites,
+  limitesHumedadInicial,
 } from '../services/mockData';
 import type {
   GranChacoZoneId,
@@ -54,6 +57,7 @@ export function NewSimulation() {
 
   const selectedZone = GRAN_CHACO_ZONES.find((z) => z.id === zone)!;
   const selectedSoil = SOIL_INFOS.find((s) => s.id === soilType)!;
+  const limitesHumedad = limitesHumedadInicial(soilType);
 
   // Heuristic local estimate; not a measured benchmark
   const totalCells = gridRows * gridCols;
@@ -83,6 +87,13 @@ export function NewSimulation() {
     e.preventDefault();
 
     if (isSubmitting) return;
+
+    if (!humedadDentroDeLimites(soilType, initialMoisture)) {
+      setSubmitError(
+        `La humedad inicial debe estar entre ${limitesHumedad.min}% y ${limitesHumedad.max}% para ${selectedSoil.label}.`
+      );
+      return;
+    }
 
     setIsSubmitting(true);
     setSubmitError(null);
@@ -199,7 +210,13 @@ export function NewSimulation() {
                   id="sim-soil"
                   className="form-select"
                   value={soilType}
-                  onChange={(e) => setSoilType(e.target.value as SoilType)}
+                  onChange={(e) => {
+                    const nuevoSuelo = e.target.value as SoilType;
+                    setSoilType(nuevoSuelo);
+                    setInitialMoisture(
+                      ajustarHumedadInicial(nuevoSuelo, initialMoisture)
+                    );
+                  }}
                 >
                   {SOIL_INFOS.map((s) => (
                     <option key={s.id} value={s.id}>
@@ -248,13 +265,16 @@ export function NewSimulation() {
                 <input
                   id="sim-initial-moisture"
                   type="number"
-                  step="0.5"
-                  min="5"
-                  max="35"
+                  step="0.01"
+                  min={limitesHumedad.min}
+                  max={limitesHumedad.max}
                   className="form-input"
                   value={initialMoisture}
                   onChange={(e) => setInitialMoisture(Number(e.target.value))}
                 />
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                  Rango físico: {limitesHumedad.min}% – {limitesHumedad.max}%
+                </div>
               </div>
             </div>
 

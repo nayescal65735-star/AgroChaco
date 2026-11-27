@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import desc, func, or_, select, update
+from sqlalchemy import desc, exists, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -21,6 +21,8 @@ from app.models import (
     Resultado,
     Simulacion,
     SimulationJob,
+    ParametroHistorico,
+    RecalibracionSimulacion,
 )
 from app.models.simulation_job import (
     ESTADOS_ACTIVOS_TRABAJO,
@@ -93,6 +95,139 @@ class SimulationRepository:
                 f"Error al crear simulación y parámetros de forma atómica: {error}"
             ) from error
 
+    @staticmethod
+    def crear_recalibracion(
+        db: Session,
+        simulacion_origen_id: str,
+        datos_simulacion: dict[str, Any],
+        datos_parametros: dict[str, Any],
+        motivo: str,
+        creado_por: str = "sistema",
+    ) -> Simulacion:
+        """Crea una simulación derivada y registra el linaje sin alterar el original."""
+        origen = db.get(Simulacion, simulacion_origen_id)
+        if origen is None:
+            raise ValueError(f"Simulación no encontrada: {simulacion_origen_id}")
+
+        recalibracion_existente = db.execute(
+            select(RecalibracionSimulacion.id).where(
+                RecalibracionSimulacion.simulacion_origen_id == simulacion_origen_id
+            )
+        ).scalar_one_or_none()
+        if recalibracion_existente is not None:
+            raise ValueError(
+                f"La simulación {simulacion_origen_id} ya tiene una recalibración registrada."
+            )
+
+        historico = db.execute(
+            select(ParametroHistorico)
+            .where(ParametroHistorico.simulacion_id == simulacion_origen_id)
+            .order_by(ParametroHistorico.id.desc())
+        ).scalars().first()
+
+        try:
+            destino = Simulacion(**datos_simulacion)
+            db.add(destino)
+            db.flush()
+            db.add(Parametro(simulacion_id=destino.id, **datos_parametros))
+            db.add(
+                RecalibracionSimulacion(
+                    simulacion_origen_id=simulacion_origen_id,
+                    simulacion_destino_id=destino.id,
+                    parametro_historico_id=historico.id if historico else None,
+                    motivo=motivo,
+                    creado_por=creado_por,
+                )
+            )
+            db.add(
+                EventoEjecucion(
+                    simulacion_id=destino.id,
+                    nivel="INFO",
+                    mensaje=(
+                        f"Recalibración derivada de {simulacion_origen_id}; "
+                        "parámetros originales conservados en parametros_historico."
+                    ),
+                )
+            )
+            db.add(
+                EventoEjecucion(
+                    simulacion_id=simulacion_origen_id,
+                    nivel="INFO",
+                    mensaje=f"Se registró la recalibración derivada {destino.id}.",
+                )
+            )
+            db.commit()
+            db.refresh(destino)
+            return destino
+        except Exception as error:
+            db.rollback()
+            raise RuntimeError(f"Error al registrar la recalibración: {error}") from error
+
+    @staticmethod
+    def simulacion_requiere_recalibracion(db: Session, simulacion_id: str) -> bool:
+        parametro = db.execute(
+            select(Parametro).where(Parametro.simulacion_id == simulacion_id)
+        ).scalar_one_or_none()
+        return parametro is not None and parametro.configuracion_heredada
+
+    @staticmethod
+    def id_trabajo_activo(db: Session, simulacion_id: str) -> str | None:
+        return db.execute(
+            select(SimulationJob.job_id).where(
+                SimulationJob.simulacion_id == simulacion_id,
+                SimulationJob.estado.in_(ESTADOS_ACTIVOS_TRABAJO),
+            )
+        ).scalar_one_or_none()
+
+    @staticmethod
+    def reconciliar_estados_running(db: Session) -> int:
+        """Pausa simulaciones running sin trabajo activo y deja constancia en eventos."""
+        ids = list(
+            db.execute(
+                select(Simulacion.id).where(
+                    Simulacion.estado == "running",
+                    ~exists(
+                        select(SimulationJob.job_id).where(
+                            SimulationJob.simulacion_id == Simulacion.id,
+                            SimulationJob.estado.in_(ESTADOS_ACTIVOS_TRABAJO),
+                        )
+                    ),
+                )
+            ).scalars().all()
+        )
+        if not ids:
+            return 0
+
+        mensaje = "Estado running sin trabajo activo; normalizado a paused por reconciliación."
+        try:
+            db.execute(
+                update(Simulacion)
+                .where(Simulacion.id.in_(ids))
+                .values(estado="paused")
+            )
+            existentes = set(
+                db.execute(
+                    select(EventoEjecucion.simulacion_id).where(
+                        EventoEjecucion.simulacion_id.in_(ids),
+                        EventoEjecucion.mensaje == mensaje,
+                    )
+                ).scalars().all()
+            )
+            for sim_id in ids:
+                if sim_id not in existentes:
+                    db.add(
+                        EventoEjecucion(
+                            simulacion_id=sim_id,
+                            nivel="WARNING",
+                            mensaje=mensaje,
+                        )
+                    )
+            db.commit()
+            return len(ids)
+        except Exception as error:
+            db.rollback()
+            raise RuntimeError(f"Error al reconciliar estados running: {error}") from error
+
     # --------------------------------------------------------------------------
     # 2. Consultas y Recuperación por ID
     # --------------------------------------------------------------------------
@@ -116,6 +251,8 @@ class SimulationRepository:
                 selectinload(Simulacion.rendimientos),
                 selectinload(Simulacion.fuentes_datos),
                 selectinload(Simulacion.eventos),
+                selectinload(Simulacion.trabajos),
+                selectinload(Simulacion.recalibraciones_origen),
             )
         )
         return db.execute(stmt).unique().scalar_one_or_none()
@@ -352,6 +489,8 @@ class SimulationRepository:
                 joinedload(Simulacion.parametro),
                 joinedload(Simulacion.resultado),
                 selectinload(Simulacion.rendimientos),
+                selectinload(Simulacion.trabajos),
+                selectinload(Simulacion.recalibraciones_origen),
             )
             .order_by(desc(Simulacion.fecha_creacion))
             .offset(offset)

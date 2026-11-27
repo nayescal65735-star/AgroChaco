@@ -124,7 +124,7 @@ export function PerformanceComparison() {
     selectedParadigm === 'all' || engine === selectedParadigm;
 
   const realCompletedSimulations = simulations.filter(
-    (s) => s.status === 'completed' && s.executionTimeSeconds != null
+    (s) => !s.isDemo && s.status === 'completed' && s.executionTimeSeconds != null
   );
 
   const filteredSummary = EXPERIMENTAL_CPLUSPLUS_BENCHMARKS.filter((item) => matchesParadigm(item.engine));

@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status as http_status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -17,6 +18,7 @@ from app.models.parametro import (
     canonizar_humedad_inicial,
     sincronizar_humedad_json,
     validar_humedad_inicial,
+    validar_soil_type,
 )
 from app.models.simulacion import Simulacion
 from app.services.export_service import ExportService
@@ -154,6 +156,14 @@ class SimulationCreate(BaseModel):
         return self
 
 
+class RecalibracionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    initialMoisturePercent: float = Field(ge=0, le=100, allow_inf_nan=False)
+    soilType: SoilType | None = None
+    motivo: str = Field(min_length=5, max_length=500)
+
+
 # Valores biofísicos de referencia según la base agronómica del Chaco (SOILS en motor/src/agronomic_data.cpp)
 # (Capacidad de agua disponible en mm/m y umbral hídrico aproximado del 50%)
 SOIL_WATER_CAPACITY_MAP: dict[str, tuple[Decimal, Decimal]] = {
@@ -200,6 +210,15 @@ def _format_simulation_response(sim: Simulacion) -> dict[str, Any]:
         else datetime.now(timezone.utc).isoformat()
     )
 
+    trabajos = getattr(sim, "trabajos", None) or []
+    trabajo_activo = next(
+        (trabajo for trabajo in trabajos if trabajo.estado in {"queued", "running"}),
+        None,
+    )
+    recalibraciones = getattr(sim, "recalibraciones_origen", None) or []
+    recalibracion = recalibraciones[0] if recalibraciones else None
+    es_heredada = bool(sim.parametro and sim.parametro.configuracion_heredada)
+
     response_data: dict[str, Any] = {
         "id": sim.id,
         "config": config_dict,
@@ -211,6 +230,13 @@ def _format_simulation_response(sim: Simulacion) -> dict[str, Any]:
         "spatialGrid": [],
         "logs": [],
         "waterBalanceSummary": None,
+        "isDemo": bool(getattr(sim, "es_demo", False)),
+        "isHistoricalConfig": es_heredada,
+        "requiresRecalibration": es_heredada and recalibracion is None,
+        "recalibrationId": (
+            str(recalibracion.simulacion_destino_id) if recalibracion else None
+        ),
+        "activeJobId": str(trabajo_activo.job_id) if trabajo_activo else None,
     }
 
     # Adjuntar métricas HPC si existen registradas en PostgreSQL
@@ -386,6 +412,102 @@ def create_simulation(data: SimulationCreate, db: Session = Depends(get_db)):
     return _format_simulation_response(sim)
 
 
+@router.post("/{simulation_id}/recalibrate", status_code=http_status.HTTP_201_CREATED)
+def recalibrate_simulation(
+    simulation_id: str,
+    data: RecalibracionCreate,
+    db: Session = Depends(get_db),
+):
+    try:
+        sim_id_seguro = MotorService.validar_simulation_id(simulation_id)
+    except MotorSecurityError as err:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=f"Identificador de simulación inválido: {err}",
+        ) from err
+
+    simulation = SimulationRepository.obtener_por_id(
+        db, sim_id_seguro, cargar_relaciones=True
+    )
+    if simulation is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Simulación no encontrada.",
+        )
+    if not SimulationRepository.simulacion_requiere_recalibracion(db, sim_id_seguro):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="La simulación no requiere recalibración o ya fue corregida.",
+        )
+    if simulation.parametro is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="La simulación no tiene parámetros asociados.",
+        )
+
+    configuracion_original = (
+        dict(simulation.parametro.configuracion_json)
+        if isinstance(simulation.parametro.configuracion_json, dict)
+        else {}
+    )
+    suelo = data.soilType or configuracion_original.get("soilType")
+    try:
+        suelo = validar_soil_type(suelo)
+        humedad = validar_humedad_inicial(data.initialMoisturePercent, suelo)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"{error} Si el suelo original es desconocido, indique soilType explícitamente."
+            ),
+        ) from error
+
+    configuracion = sincronizar_humedad_json(configuracion_original, humedad)
+    configuracion["soilType"] = suelo
+    configuracion = sincronizar_humedad_json(configuracion, humedad)
+    cap_suelo, umbral_hid = SOIL_WATER_CAPACITY_MAP[suelo]
+
+    datos_sim = {
+        "id": f"SIM-{uuid4().hex[:12].upper()}",
+        "nombre": f"{simulation.nombre} (recalibrada)",
+        "fuente_datos": simulation.fuente_datos,
+        "escenario": simulation.escenario,
+        "cantidad_escenarios": simulation.cantidad_escenarios,
+        "dias": simulation.dias,
+        "estado": "pending",
+        "semilla": None,
+        "es_demo": bool(simulation.es_demo),
+    }
+    datos_param = {
+        "agua_inicial": humedad,
+        "capacidad_suelo": cap_suelo,
+        "umbral_hidrico": umbral_hid,
+        "configuracion_json": configuracion,
+    }
+
+    try:
+        destino = SimulationRepository.crear_recalibracion(
+            db,
+            sim_id_seguro,
+            datos_sim,
+            datos_param,
+            motivo=data.motivo,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=str(error),
+        ) from error
+    except Exception as error:
+        logger.exception("No se pudo registrar la recalibración de %s", sim_id_seguro)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No se pudo registrar la recalibración.",
+        ) from error
+
+    return _format_simulation_response(destino)
+
+
 @router.get("")
 def list_simulations(
     search: str | None = None,
@@ -456,6 +578,14 @@ def execute_simulation(simulation_id: str, db: Session = Depends(get_db)):
             status_code=http_status.HTTP_409_CONFLICT,
             detail=f"La simulación '{sim_id_seguro}' ya se encuentra en ejecución.",
         )
+    if SimulationRepository.simulacion_requiere_recalibracion(db, sim_id_seguro):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                f"La simulación '{sim_id_seguro}' usa una configuración histórica. "
+                "Genere una recalibración trazable antes de ejecutarla."
+            ),
+        )
 
     try:
         trabajo = SimulationRepository.crear_trabajo_unico(db, sim_id_seguro)
@@ -463,6 +593,14 @@ def execute_simulation(simulation_id: str, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail=str(error),
+        ) from error
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                f"La simulación '{sim_id_seguro}' usa una configuración histórica no ejecutable."
+            ),
         ) from error
     except Exception as error:
         logger.exception("No se pudo crear el trabajo de %s", sim_id_seguro)

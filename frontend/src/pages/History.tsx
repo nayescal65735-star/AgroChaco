@@ -212,6 +212,14 @@ export function History() {
                       <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
                         {sim.config.name}
                       </div>
+                      <div style={{ display: 'flex', gap: '0.3rem', marginTop: '0.3rem' }}>
+                        {sim.isDemo && <span className="system-tag">DEMO</span>}
+                        {sim.isHistoricalConfig && (
+                          <span className="system-tag" style={{ background: '#fef3c7', color: '#b45309' }}>
+                            Config. histórica
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>

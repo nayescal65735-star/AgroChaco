@@ -51,15 +51,17 @@ export function Dashboard() {
   const { simulations, setActiveSimulationId } = useSimulations();
   const navigate = useNavigate();
 
-  const totalSimulations = simulations.length;
-  const runningSimulations = simulations.filter(
+  const simulacionesReales = simulations.filter((simulation) => !simulation.isDemo);
+  const totalDemo = simulations.length - simulacionesReales.length;
+  const totalSimulations = simulacionesReales.length;
+  const runningSimulations = simulacionesReales.filter(
     (simulation) => simulation.status === 'running' || simulation.status === 'queued'
   ).length;
-  const completedSimulations = simulations.filter((s) => s.status === 'completed').length;
+  const completedSimulations = simulacionesReales.filter((s) => s.status === 'completed').length;
 
   const totalHectares = GRAN_CHACO_ZONES.reduce((acc, z) => acc + z.activeHectares, 0);
 
-  const cwsiRecords = simulations.filter((s) => s.averageCWSI !== undefined);
+  const cwsiRecords = simulacionesReales.filter((s) => s.averageCWSI !== undefined);
   const avgCWSI = cwsiRecords.length
     ? Number(
         (
@@ -69,7 +71,7 @@ export function Dashboard() {
       )
     : null;
 
-  const completedWithPerformance = simulations.filter(
+  const completedWithPerformance = simulacionesReales.filter(
     (s) => s.status === 'completed' && s.executionTimeSeconds != null
   );
 
@@ -151,7 +153,7 @@ export function Dashboard() {
         <StatCard
           label="Simulaciones"
           value={totalSimulations}
-          subtext={`${completedSimulations} completadas • ${runningSimulations} en curso`}
+          subtext={`${completedSimulations} completadas • ${runningSimulations} en curso • ${totalDemo} DEMO excluidas`}
           icon={<Activity size={24} />}
           variant="agri"
           badge="BD"
@@ -382,7 +384,7 @@ export function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {simulations.slice(0, 5).map((sim) => (
+              {simulacionesReales.slice(0, 5).map((sim) => (
                 <tr key={sim.id}>
                   <td>
                     <div style={{ fontWeight: 700, color: 'var(--navy)' }}>{sim.id}</div>

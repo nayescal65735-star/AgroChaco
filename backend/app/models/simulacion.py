@@ -2,6 +2,7 @@
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -49,6 +50,12 @@ class Simulacion(Base):
         server_default=text("'pending'"),
     )
     semilla = Column(BigInteger, nullable=True)
+    es_demo = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -104,6 +111,27 @@ class Simulacion(Base):
     trabajos = relationship(
         "SimulationJob",
         back_populates="simulacion",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    historial_parametros = relationship(
+        "ParametroHistorico",
+        back_populates="simulacion",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    recalibraciones_origen = relationship(
+        "RecalibracionSimulacion",
+        foreign_keys="RecalibracionSimulacion.simulacion_origen_id",
+        back_populates="origen",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    recalibracion_destino = relationship(
+        "RecalibracionSimulacion",
+        foreign_keys="RecalibracionSimulacion.simulacion_destino_id",
+        back_populates="destino",
+        uselist=False,
         cascade="all, delete-orphan",
         passive_deletes=True,
     )

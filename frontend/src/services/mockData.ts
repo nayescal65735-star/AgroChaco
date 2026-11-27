@@ -1,6 +1,7 @@
 import type {
   GranChacoZone,
   SoilInfo,
+  SoilType,
   CornVariety,
   User,
 } from '../types';
@@ -137,6 +138,38 @@ export const SOIL_INFOS: SoilInfo[] = [
     availableWaterMmPerM: 130,
   },
 ];
+
+export interface MoistureLimits {
+  min: number;
+  max: number;
+  default: number;
+}
+
+export function limitesHumedadInicial(soilType: SoilType): MoistureLimits {
+  const suelo = SOIL_INFOS.find((item) => item.id === soilType);
+  if (!suelo) {
+    throw new Error(`Tipo de suelo desconocido: ${soilType}`);
+  }
+  const min = suelo.wiltingPoint;
+  const max = suelo.fieldCapacity;
+  return {
+    min,
+    max,
+    default: Number(((min + max) / 2).toFixed(2)),
+  };
+}
+
+export function humedadDentroDeLimites(soilType: SoilType, valor: number): boolean {
+  if (!Number.isFinite(valor)) return false;
+  const { min, max } = limitesHumedadInicial(soilType);
+  return valor >= min && valor <= max;
+}
+
+export function ajustarHumedadInicial(soilType: SoilType, valor: number): number {
+  if (!Number.isFinite(valor)) return limitesHumedadInicial(soilType).default;
+  const { min, max } = limitesHumedadInicial(soilType);
+  return Math.min(max, Math.max(min, Number(valor.toFixed(2))));
+}
 
 export const CORN_VARIETIES: CornVariety[] = [
   {

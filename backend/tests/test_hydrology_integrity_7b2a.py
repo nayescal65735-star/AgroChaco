@@ -315,13 +315,13 @@ def test_migracion_004_repara_y_consolida_sin_tocar_resultados():
         if resultado.returncode:
             raise RuntimeError(f"alembic {' '.join(argumentos)} falló:\n{resultado.stderr}")
 
-    def insertar(sim_id, estado, agua, configuracion, con_resultado=False):
+    def insertar(sim_id, estado, agua, configuracion, con_resultado=False, nombre="migracion"):
         with temporal() as conn:
             conn.execute(
                 "INSERT INTO simulaciones "
                 "(id, nombre, fuente_datos, escenario, dias, estado) "
-                "VALUES (%s, 'migracion', 'regresion', 'historico', 30, %s)",
-                (sim_id, estado),
+                "VALUES (%s, %s, 'regresion', 'historico', 30, %s)",
+                (sim_id, nombre, estado),
             )
             conn.execute(
                 "INSERT INTO parametros "
@@ -388,6 +388,13 @@ def test_migracion_004_repara_y_consolida_sin_tocar_resultados():
             Decimal("10.00"),
             {"soilType": None, "initialMoisturePercent": 99.0},
         )
+        insertar(
+            "SIM-7B2A-DEMO-RUNNING",
+            "running",
+            Decimal("20.00"),
+            {"soilType": "franco_arenoso", "initialMoisturePercent": 20.0},
+            nombre="[DEMO] Corrida huérfana",
+        )
         with temporal() as conn:
             resultado_antes = conn.execute(
                 "SELECT deficit_medio, deficit_maximo, agua_final_media, agua_minima "
@@ -398,9 +405,21 @@ def test_migracion_004_repara_y_consolida_sin_tocar_resultados():
 
         with temporal() as conn:
             filas = {
-                fila[0]: (Decimal(str(fila[1])), fila[2])
+                fila[0]: (
+                    Decimal(str(fila[1])),
+                    fila[2],
+                    fila[3],
+                )
                 for fila in conn.execute(
-                    "SELECT simulacion_id, agua_inicial, configuracion_json FROM parametros"
+                    "SELECT simulacion_id, agua_inicial, configuracion_json, configuracion_heredada "
+                    "FROM parametros"
+                ).fetchall()
+            }
+            instantaneas = {
+                fila[0]: (Decimal(str(fila[1])), fila[2], fila[3], fila[4])
+                for fila in conn.execute(
+                    "SELECT simulacion_id, agua_inicial, configuracion_json, fuente, "
+                    "original_recuperable FROM parametros_historico"
                 ).fetchall()
             }
             resultado_despues = conn.execute(
@@ -410,22 +429,47 @@ def test_migracion_004_repara_y_consolida_sin_tocar_resultados():
             estado_despues = conn.execute(
                 "SELECT estado FROM simulaciones WHERE id = 'SIM-7B2A-KNOWN'"
             ).fetchone()[0]
+            estado_demo = conn.execute(
+                "SELECT estado, es_demo FROM simulaciones WHERE id = 'SIM-7B2A-DEMO-RUNNING'"
+            ).fetchone()
+            evento_reconciliacion = conn.execute(
+                "SELECT count(*) FROM eventos_ejecucion WHERE simulacion_id = "
+                "'SIM-7B2A-DEMO-RUNNING' AND mensaje LIKE '%running sin trabajo activo%'"
+            ).fetchone()[0]
 
-        agua, configuracion = filas["SIM-7B2A-KNOWN"]
-        assert agua == Decimal("18.50")
-        assert Decimal(str(configuracion["initialMoisturePercent"])) == agua
+            with pytest.raises(psycopg.errors.CheckViolation):
+                conn.execute(
+                    "INSERT INTO simulation_jobs (job_id, simulacion_id, estado) "
+                    "VALUES (gen_random_uuid(), 'SIM-7B2A-KNOWN', 'queued')"
+                )
+            conn.rollback()
+
+        agua, configuracion, heredada = filas["SIM-7B2A-KNOWN"]
+        assert agua == Decimal("22.50")
+        assert Decimal(str(configuracion["initialMoisturePercent"])) == Decimal("21.00")
+        assert heredada is True
+        assert instantaneas["SIM-7B2A-KNOWN"] == (
+            Decimal("22.50"),
+            {"soilType": "franco_arenoso", "initialMoisturePercent": 21.0},
+            "004_pre_migracion",
+            True,
+        )
         for sim_id, suelo_esperado in (
             ("SIM-7B2A-UNKNOWN", "suelo_desconocido"),
             ("SIM-7B2A-MISSING", None),
             ("SIM-7B2A-NULL", None),
         ):
-            agua_ambigua, configuracion_ambigua = filas[sim_id]
+            agua_ambigua, configuracion_ambigua, heredada_ambigua = filas[sim_id]
             assert configuracion_ambigua.get("soilType") == suelo_esperado
             assert Decimal(str(configuracion_ambigua["initialMoisturePercent"])) == agua_ambigua
+            assert heredada_ambigua is True
+            assert sim_id in instantaneas
         assert "soilType" not in filas["SIM-7B2A-MISSING"][1]
         assert "soilType" in filas["SIM-7B2A-NULL"][1]
         assert resultado_despues == resultado_antes
         assert estado_despues == "completed"
+        assert estado_demo == ("paused", True)
+        assert evento_reconciliacion == 1
 
         assert not intentar_insertar(
             "SIM-7B2A-NEW-UNKNOWN", Decimal("18.50"), {"soilType": "suelo_desconocido"}

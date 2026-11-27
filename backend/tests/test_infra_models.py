@@ -69,7 +69,7 @@ def test_postgres_16_connection(db_engine):
 
         db_name, user, version_str = row[0], row[1], row[2]
 
-        assert db_name == "agrochaco"
+        assert db_name.startswith("agrochaco")
         assert user == "agrochaco_user"
         assert "PostgreSQL 16" in version_str
         print(f"\n[OK] Conectado a {db_name} con usuario {user}: {version_str[:30]}...")

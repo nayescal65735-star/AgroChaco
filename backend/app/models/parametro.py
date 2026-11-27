@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Column,
     ForeignKey,
@@ -14,6 +15,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     event,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
@@ -50,9 +52,12 @@ def initial_moisture_check_sql() -> str:
     )
     tipos = ", ".join(f"'{soil}'" for soil in SOIL_TYPES)
     return (
-        f"configuracion_json->>'soilType' IN ({tipos}) "
+        "configuracion_heredada OR ("
+        f"configuracion_json->>'soilType' IS NOT NULL "
+        f"AND configuracion_json->>'soilType' IN ({tipos}) "
         "AND agua_inicial >= 0 AND agua_inicial <= 100 "
         f"AND (CASE configuracion_json->>'soilType' {cases} ELSE 1 = 0 END)"
+        ")"
     )
 
 
@@ -109,6 +114,12 @@ class Parametro(Base):
         JSONB().with_variant(JSON(), "sqlite"),
         nullable=False,
     )
+    configuracion_heredada = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -128,6 +139,12 @@ class Parametro(Base):
     )
 
     simulacion = relationship("Simulacion", back_populates="parametro")
+    historial = relationship(
+        "ParametroHistorico",
+        back_populates="parametro",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     def __repr__(self) -> str:
         return f"<Parametro(id={self.id}, simulacion_id='{self.simulacion_id}')>"
@@ -136,6 +153,8 @@ class Parametro(Base):
 @event.listens_for(Parametro, "before_insert")
 @event.listens_for(Parametro, "before_update")
 def _validar_humedad_inicial_orm(mapper, connection, target):
+    if getattr(target, "configuracion_heredada", False):
+        return
     configuracion = target.configuracion_json
     soil_type = configuracion.get("soilType") if isinstance(configuracion, dict) else None
     validar_humedad_inicial(target.agua_inicial, soil_type)

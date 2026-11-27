@@ -188,6 +188,11 @@ export interface SimulationResult {
   timelineData: TimelineDataPoint[];
   spatialGrid: SpatialCell[];
   logs: SimulationLog[];
+  isDemo?: boolean;
+  isHistoricalConfig?: boolean;
+  requiresRecalibration?: boolean;
+  recalibrationId?: string | null;
+  activeJobId?: string | null;
 }
 
 export interface SimulationLog {

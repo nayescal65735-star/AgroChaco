@@ -48,6 +48,7 @@ CHACO_SEEDS = [
             "cantidad_escenarios": 10,
             "dias": 120,
             "estado": "completed",
+            "es_demo": True,
             "semilla": 1024,
         },
         "parametro": {
@@ -119,6 +120,7 @@ CHACO_SEEDS = [
             "cantidad_escenarios": 20,
             "dias": 140,
             "estado": "completed",
+            "es_demo": True,
             "semilla": 2048,
         },
         "parametro": {
@@ -178,6 +180,7 @@ CHACO_SEEDS = [
             "cantidad_escenarios": 5,
             "dias": 90,
             "estado": "completed",
+            "es_demo": True,
             "semilla": 4096,
         },
         "parametro": {
@@ -238,6 +241,7 @@ CHACO_SEEDS = [
             "cantidad_escenarios": 8,
             "dias": 100,
             "estado": "running",
+            "es_demo": True,
             "semilla": 8192,
         },
         "parametro": {
@@ -280,6 +284,7 @@ CHACO_SEEDS = [
             "cantidad_escenarios": 2,
             "dias": 110,
             "estado": "completed",
+            "es_demo": True,
             "semilla": 16384,
         },
         "parametro": {
@@ -337,6 +342,7 @@ CHACO_SEEDS = [
             "cantidad_escenarios": 12,
             "dias": 130,
             "estado": "pending",
+            "es_demo": True,
             "semilla": 32768,
         },
         "parametro": {
